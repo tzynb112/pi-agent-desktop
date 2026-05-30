@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DeepSeek V4.1 — 信息中心</title>
+    <style>
+        /* ===== Reset & Base ===== */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html { scroll-behavior: smooth; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans SC", sans-serif;
+            background: #0b0d15;
+            color: #e4e6ed;
+            line-height: 1.7;
+        }
+        a { color: #6c8cff; text-decoration: none; transition: color .2s; }
+        a:hover { color: #8ba6ff; text-decoration: underline; }
+
+        /* ===== Navigation ===== */
+        nav {
+            position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+            background: rgba(11,13,21,.85);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-bottom: 1px solid rgba(108,140,255,.15);
+            padding: 0 24px;
+            display: flex; align-items: center; justify-content: space-between;
+            height: 60px;
+        }
+        nav .logo { font-weight: 700; font-size: 1.15rem; letter-spacing: .5px; color: #fff; }
+        nav .logo span { color: #6c8cff; }
+        nav ul { list-style: none; display: flex; gap: 4px; }
+        nav ul li a {
+            display: block; padding: 8px 16px; border-radius: 8px;
+            font-size: .9rem; color: #aaa; transition: all .2s;
+        }
+        nav ul li a:hover, nav ul li a.active { background: rgba(108,140,255,.12); color: #fff; text-decoration: none; }
+        .nav-indicator { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #22c55e; margin-right: 8px; vertical-align: middle; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+        /* ===== Layout ===== */
+        .container { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+        section { padding: 90px 0 60px; scroll-margin-top: 70px; }
+
+        /* ===== Hero ===== */
+        .hero {
+            padding: 140px 0 80px; text-align: center;
+            background: radial-gradient(ellipse at 50% -20%, rgba(108,140,255,.08) 0%, transparent 60%);
+        }
+        .hero h1 { font-size: 3.2rem; font-weight: 800; letter-spacing: -1px; }
+        .hero h1 span { color: #6c8cff; }
+        .hero .subtitle {
+            font-size: 1.2rem; color: #999; margin: 16px 0 24px; max-width: 640px; margin-inline: auto;
+        }
+        .hero .badge-group { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+        .badge {
+            display: inline-block; padding: 6px 18px; border-radius: 20px;
+            font-size: .85rem; font-weight: 500;
+        }
+        .badge-blue { background: rgba(108,140,255,.15); color: #8ba6ff; border: 1px solid rgba(108,140,255,.25); }
+        .badge-yellow { background: rgba(250,204,21,.12); color: #facc15; border: 1px solid rgba(250,204,21,.2); }
+        .badge-red { background: rgba(239,68,68,.12); color: #ef4444; border: 1px solid rgba(239,68,68,.2); }
+        .badge-green { background: rgba(34,197,94,.12); color: #4ade80; border: 1px solid rgba(34,197,94,.2); }
+        .badge-purple { background: rgba(168,85,247,.12); color: #c084fc; border: 1px solid rgba(168,85,247,.2); }
+        .badge-orange { background: rgba(251,146,60,.12); color: #fb923c; border: 1px solid rgba(251,146,60,.2); }
+        .speculative { position: relative; }
+        .speculative::after {
+            content: "⚡ 推测"; position: absolute; top: -8px; right: -8px;
+            font-size: .65rem; background: #ef4444; color: #fff;
+            padding: 1px 6px; border-radius: 6px; font-weight: 600;
+        }
+
+        /* ===== Cards ===== */
+        .card {
+            background: rgba(255,255,255,.04);
+            border: 1px solid rgba(255,255,255,.06);
+            border-radius: 16px; padding: 28px 32px;
+            transition: transform .2s, box-shadow .2s;
+        }
+        .card:hover { transform: translateY(-3px); box-shadow: 0 8px 32px rgba(0,0,0,.3); }
+        .card h2 { font-size: 1.5rem; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+        .card h2 .icon { font-size: 1.6rem; }
+        .card-grid { display: grid; gap: 24px; }
+        .grid-2 { grid-template-columns: 1fr 1fr; }
+        .grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+        .grid-4 { grid-template-columns: 1fr 1fr; }
+
+        /* ===== Table ===== */
+        .table-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid rgba(255,255,255,.06); }
+        table { width: 100%; border-collapse: collapse; font-size: .95rem; }
+        thead { background: rgba(108,140,255,.08); }
+        th, td { padding: 14px 18px; text-align: left; border-bottom: 1px solid rgba(255,255,255,.04); }
+        th { font-weight: 600; color: #8ba6ff; white-space: nowrap; }
+        tr:last-child td { border-bottom: none; }
+        td.spec { background: rgba(239,68,68,.04); }
+
+        /* ===== Timeline ===== */
+        .timeline { position: relative; padding-left: 32px; }
+        .timeline::before {
+            content: ''; position: absolute; left: 12px; top: 0; bottom: 0;
+            width: 2px; background: linear-gradient(to bottom, rgba(108,140,255,.4), rgba(108,140,255,.05));
+        }
+        .timeline-item { position: relative; margin-bottom: 32px; }
+        .timeline-item::before {
+            content: ''; position: absolute; left: -26px; top: 6px;
+            width: 12px; height: 12px; border-radius: 50%;
+            background: #6c8cff; border: 3px solid #0b0d15; box-shadow: 0 0 0 2px rgba(108,140,255,.3);
+        }
+        .timeline-item.confirmed::before { background: #22c55e; box-shadow: 0 0 0 2px rgba(34,197,94,.3); }
+        .timeline-item.speculative::before { background: #ef4444; box-shadow: 0 0 0 2px rgba(239,68,68,.3); }
+        .timeline-date { font-size: .85rem; color: #6c8cff; font-weight: 600; }
+        .timeline-title { font-size: 1.1rem; font-weight: 600; margin: 4px 0 6px; }
+        .timeline-desc { color: #aaa; font-size: .95rem; }
+
+        /* ===== Resource Links ===== */
+        .resource-list { list-style: none; display: grid; gap: 12px; }
+        .resource-list li { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: rgba(255,255,255,.03); border-radius: 10px; border: 1px solid rgba(255,255,255,.04); transition: background .2s; }
+        .resource-list li:hover { background: rgba(255,255,255,.06); }
+        .resource-list li .r-icon { font-size: 1.3rem; width: 32px; text-align: center; }
+
+        /* ===== Footer ===== */
+        footer { text-align: center; padding: 40px 24px; border-top: 1px solid rgba(255,255,255,.04); margin-top: 40px; }
+        footer p { color: #666; font-size: .85rem; }
+
+        /* ===== Section Title ===== */
+        .section-title { font-size: 2rem; font-weight: 700; margin-bottom: 32px; }
+        .section-title small { display: block; font-size: .9rem; font-weight: 400; color: #888; margin-top: 4px; }
+
+        /* ===== Scroll animations ===== */
+        .fade-in { opacity: 0; transform: translateY(24px); transition: opacity .6s ease, transform .6s ease; }
+        .fade-in.visible { opacity: 1; transform: translateY(0); }
+
+        /* ===== Responsive ===== */
+        @media (max-width: 768px) {
+            .hero h1 { font-size: 2.2rem; }
+            .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+            nav ul { gap: 0; }
+            nav ul li a { padding: 6px 10px; font-size: .8rem; }
+            .table-wrap { font-size: .85rem; }
+        }
+
+        /* ===== Disclaimer ===== */
+        .disclaimer { background: rgba(239,68,68,.06); border: 1px solid rgba(239,68,68,.15); border-radius: 12px; padding: 20px 24px; margin-bottom: 28px; }
+        .disclaimer strong { color: #ef4444; }
+    </style>
+</head>
+<body>
+
+<!-- Navigation -->
+<nav>
+    <div class="logo"><span>✦</span> DeepSeek <span>V4.1</span></div>
+    <ul>
+        <li><a href="#home">首页</a></li>
+        <li><a href="#features">特性</a></li>
+        <li><a href="#tech">技术细节</a></li>
+        <li><a href="#timeline">时间线</a></li>
+        <li><a href="#resources">资源</a></li>
+    </ul>
+</nav>
+
+<!-- ==================== HOME ==================== -->
+<section id="home" class="hero">
+    <div class="container">
+        <div>
+            <span class="badge badge-red">未发布</span>
+            <span class="badge badge-yellow">社区推测</span>
+            <span class="badge badge-green">官方线索</span>
+        </div>
+        <h1>DeepSeek <span>V4.1</span></h1>
+        <p class="subtitle">下一代大语言模型的信息聚合站 —— 汇集官方线索、社区讨论与推测性分析，持续追踪最新动态。</p>
+        <div class="badge-group" style="margin-top:24px">
+            <span class="badge badge-blue"><span class="nav-indicator" style="width:6px;height:6px;margin-right:6px"></span>活跃追踪中</span>
+            <span class="badge badge-purple">预计 2026 Q3-Q4</span>
+            <span class="badge badge-orange">MoE 架构进化</span>
+        </div>
+    </div>
+</section>
+
+<!-- ==================== DISCLAIMER ==================== -->
+<div class="container">
+    <div class="disclaimer fade-in">
+        <strong>⚠️ 重要提示：</strong>
+        DeepSeek V4.1 尚未正式发布。本页面基于公开线索、专利信息及社区讨论进行汇总，所有标记为「推测」的内容均不代表官方确认。信息可能随官方公告而变化。
+    </div>
+</div>
+
+<!-- ==================== FEATURES ==================== -->
+<section id="features">
+    <div class="container">
+        <h2 class="section-title fade-in">推测特性 <small>基于公开线索与社区讨论的合理推测</small></h2>
+        <div class="card-grid grid-3">
+            <div class="card fade-in">
+                <h2><span class="icon">🧠</span> 增强推理</h2>
+                <p>预计在 V3 基础上大幅提升 <strong>Chain-of-Thought</strong> 深度，可能引入多轮反思机制与自适应推理预算控制。</p>
+                <div style="margin-top:12px"><span class="badge badge-red speculative">推测</span></div>
+            </div>
+            <div class="card fade-in">
+                <h2><span class="icon">🔗</span> 超长上下文</h2>
+                <p>推测支持 <strong>1M+ tokens</strong> 上下文窗口，采用改进的旋转位置编码（RoPE）与稀疏注意力机制。</p>
+                <div style="margin-top:12px"><span class="badge badge-red speculative">推测</span></div>
+            </div>
+            <div class="card fade-in">
+                <h2><span class="icon">⚡</span> MoE 优化</h2>
+                <p>传闻采用升级版 <strong>Mixture-of-Experts</strong> 架构，专家数量从 256 提升至 512，激活参数比进一步优化。</p>
+                <div style="margin-top:12px"><span class="badge badge-red speculative">推测</span></div>
+            </div>
+            <div class="card fade-in">
+                <h2><span class="icon">🌐</span> 多模态融合</h2>
+                <p>可能原生支持 <strong>图像、音频</strong> 输入，统一多模态理解与生成能力，对齐 GPT-4o 级别体验。</p>
+                <div style="margin-top:12px"><span class="badge badge-red speculative">推测</span></div>
+            </div>
+            <div class="card fade-in">
+                <h2><span class="icon">🔐</span> 安全对齐</h2>
+                <p>采用新一代 RLHF + 宪法 AI 混合对齐策略，强化有害内容过滤与价值观对齐。</p>
+                <div style="margin-top:12px"><span class="badge badge-red speculative">推测</span></div>
+            </div>
+            <div class="card fade-in">
+                <h2><span class="icon">💰</span> API 性价比</h2>
+                <p>有望延续 DeepSeek 定价策略，推理成本较 V3 降低 30-50%，进一步推动开源模型商业化。</p>
+                <div style="margin-top:12px"><span class="badge badge-red speculative">推测</span></div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ==================== TECH DETAILS ==================== -->
+<section id="tech">
+    <div class="container">
+        <h2 class="section-title fade-in">技术细节对比 <small>V4.1 推测 vs V3 已确认参数</small></h2>
+
+        <div class="table-wrap fade-in">
+            <table>
+                <thead>
+                    <tr>
+                        <th>指标</th>
+                        <th>DeepSeek V3 (已发布)</th>
+                        <th>DeepSeek V4.1 (推测)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>架构</td>
+                        <td>MoE (256 专家, 37B 激活)</td>
+                        <td class="spec">MoE (推测 512 专家, ~40-45B 激活)</td>
+                    </tr>
+                    <tr>
+                        <td>总参数量</td>
+                        <td>671B</td>
+                        <td class="spec">推测 ~800B - 1T</td>
+                    </tr>
+                    <tr>
+                        <td>上下文窗口</td>
+                        <td>128K tokens</td>
+                        <td class="spec">推测 256K - 1M tokens</td>
+                    </tr>
+                    <tr>
+                        <td>训练数据</td>
+                        <td>14.8T tokens</td>
+                        <td class="spec">推测 20T+ tokens</td>
+                    </tr>
+                    <tr>
+                        <td>多模态</td>
+                        <td>文本 (无原生多模态)</td>
+                        <td class="spec">推测 文本 + 图像 / 音频</td>
+                    </tr>
+                    <tr>
+                        <td>推理优化</td>
+                        <td>Multi-Token Prediction (MTP)</td>
+                        <td class="spec">推测 MTP v2 + 推测解码</td>
+                    </tr>
+                    <tr>
+                        <td>对齐技术</td>
+                        <td>RLHF (PPO)</td>
+                        <td class="spec">推测 RLHF + Constitutional AI</td>
+                    </tr>
+                    <tr>
+                        <td>API 定价 (输入 / 1M tokens)</td>
+                        <td>$0.27</td>
+                        <td class="spec">推测 $0.15 - $0.20</td>
+                    </tr>
+                    <tr>
+                        <td>开源计划</td>
+                        <td>开源 (MIT License)</td>
+                        <td class="spec">推测 继续开源</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div style="margin-top:16px;text-align:right">
+            <span class="badge badge-red speculative">红色背景行 = 推测数据</span>
+        </div>
+    </div>
+</section>
+
+<!-- ==================== TIMELINE ==================== -->
+<section id="timeline">
+    <div class="container">
+        <h2 class="section-title fade-in">发展时间线 <small>公开事件与社区追踪</small></h2>
+
+        <div class="timeline fade-in">
+            <div class="timeline-item confirmed">
+                <div class="timeline-date">2025 年 12 月</div>
+                <div class="timeline-title">DeepSeek V3 正式发布</div>
+                <div class="timeline-desc">开源 MoE 模型，671B 参数，各项基准测试表现优异，引发全球关注。</div>
+            </div>
+            <div class="timeline-item confirmed">
+                <div class="timeline-date">2026 年 1 月</div>
+                <div class="timeline-title">DeepSeek 发布 R1 推理模型</div>
+                <div class="timeline-desc">基于 V3 的强化学习推理模型，Chain-of-Thought 能力大幅提升，推理能力对标 o1。</div>
+            </div>
+            <div class="timeline-item confirmed">
+                <div class="timeline-date">2026 年 3 月</div>
+                <div class="timeline-title">V4.1 商标申请被发现</div>
+                <div class="timeline-desc">社区发现 DeepSeek 提交 "DeepSeek V4.1" 商标申请，引发下一代模型猜测。</div>
+            </div>
+            <div class="timeline-item speculative">
+                <div class="timeline-date">2026 年 4 月（推测）</div>
+                <div class="timeline-title">多模态相关专利公开</div>
+                <div class="timeline-desc">DeepSeek 提交多项多模态融合与长上下文专利，暗示 V4.1 方向。</div>
+            </div>
+            <div class="timeline-item speculative">
+                <div class="timeline-date">2026 年 5 月</div>
+                <div class="timeline-title">社区推测 V4.1 进入训练收尾阶段</div>
+                <div class="timeline-desc">根据 API 测试端点和招聘信息推测训练已完成，正在对齐与测试阶段。</div>
+            </div>
+            <div class="timeline-item speculative">
+                <div class="timeline-date">2026 Q3-Q4（预计）</div>
+                <div class="timeline-title">V4.1 正式发布（待定）</div>
+                <div class="timeline-desc">根据过往发布节奏推测，V4.1 可能在 2026 下半年正式发布。</div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ==================== RESOURCES ==================== -->
+<section id="resources">
+    <div class="container">
+        <h2 class="section-title fade-in">资源与链接 <small>官方渠道与社区讨论</small></h2>
+
+        <div class="card-grid grid-2">
+            <div class="card fade-in">
+                <h3 style="margin-bottom:16px">🔵 官方渠道</h3>
+                <ul class="resource-list">
+                    <li><span class="r-icon">🌐</span> <a href="https://www.deepseek.com" target="_blank" rel="noopener">DeepSeek 官网</a></li>
+                    <li><span class="r-icon">📄</span> <a href="https://api-docs.deepseek.com" target="_blank" rel="noopener">API 文档</a></li>
+                    <li><span class="r-icon">🐙</span> <a href="https://github.com/deepseek-ai" target="_blank" rel="noopener">GitHub 组织</a></li>
+                    <li><span class="r-icon">🐦</span> <a href="https://twitter.com/deepseek_ai" target="_blank" rel="noopener">Twitter / X</a></li>
+                    <li><span class="r-icon">📖</span> <a href="https://arxiv.org/abs/2412.19437" target="_blank" rel="noopener">DeepSeek-V3 技术论文 (arXiv)</a></li>
+                </ul>
+            </div>
+            <div class="card fade-in">
+                <h3 style="margin-bottom:16px">🟣 社区讨论</h3>
+                <ul class="resource-list">
+                    <li><span class="r-icon">💬</span> <a href="https://www.reddit.com/r/LocalLLaMA/" target="_blank" rel="noopener">r/LocalLLaMA Reddit</a></li>
+                    <li><span class="r-icon">🏗️</span> <a href="https://huggingface.co/spaces" target="_blank" rel="noopener">Hugging Face Spaces / 模型卡</a></li>
+                    <li><span class="r-icon">📊</span> <a href="https://github.com/open-compass" target="_blank" rel="noopener">OpenCompass 评测榜</a></li>
+                    <li><span class="r-icon">📝</span> <a href="https://www.zhihu.com/topic/deepseek" target="_blank" rel="noopener">知乎 DeepSeek 话题</a></li>
+                    <li><span class="r-icon">🎙️</span> <a href="https://www.youtube.com/results?search_query=deepseek+v4" target="_blank" rel="noopener">YouTube 分析视频</a></li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Footer -->
+<footer>
+    <div class="container">
+        <p>本页面为 <strong>DeepSeek V4.1</strong> 非官方信息聚合站。所有推测内容均基于公开信息与社区讨论，不代表官方立场。</p>
+        <p style="margin-top:8px">© 2026 · 持续更新 · 数据截至 2026年5月30日</p>
+    </div>
+</footer>
+
+<!-- ===== JavaScript ===== -->
+<script>
+(function() {
+    'use strict';
+
+    // ---- Active nav highlight on scroll ----
+    const sections = document.querySelectorAll('section');
+    const navLinks = document.querySelectorAll('nav ul li a');
+
+    function updateActiveNav() {
+        let current = '';
+        sections.forEach(sec => {
+            const top = sec.offsetTop - 120;
+            if (window.scrollY >= top) current = sec.id;
+        });
+        navLinks.forEach(link => {
+            link.classList.remove('active');
+            if (link.getAttribute('href') === '#' + current) link.classList.add('active');
+        });
+    }
+    window.addEventListener('scroll', updateActiveNav);
+    updateActiveNav();
+
+    // ---- Scroll-triggered fade-in ----
+    const fadeEls = document.querySelectorAll('.fade-in');
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                entry.target.classList.add('visible');
+                observer.unobserve(entry.target);
+            }
+        });
+    }, { threshold: 0.15 });
+
+    fadeEls.forEach(el => observer.observe(el));
+
+    // ---- Smooth scroll for nav links ----
+    navLinks.forEach(link => {
+        link.addEventListener('click', function(e) {
+            e.preventDefault();
+            const target = document.querySelector(this.getAttribute('href'));
+            if (target) {
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        });
+    });
+})();
+</script>
+</body>
+</html>
