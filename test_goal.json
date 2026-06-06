@@ -1,0 +1,20 @@
+{
+  "goal": "构建一个hello world程序",
+  "tasks": [
+    {
+      "id": 1,
+      "description": "选择编程语言（如Python、C++、JavaScript等）",
+      "status": "pending"
+    },
+    {
+      "id": 2,
+      "description": "编写hello world源代码",
+      "status": "pending"
+    },
+    {
+      "id": 3,
+      "description": "编译/运行程序，验证输出",
+      "status": "pending"
+    }
+  ]
+}

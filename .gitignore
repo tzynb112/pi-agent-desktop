@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.log
+*.restored
+scratch_*.txt
+recovered_*.ts
+.arts/
+.codeartsdoer/
