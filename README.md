@@ -9,6 +9,14 @@ Unofficial desktop client for the open-source Pi coding agent.
 
 The renderer runs on `http://localhost:9000` during development.
 
+## Downloads
+
+Published installers are attached to [GitHub Releases](https://github.com/tzynb112/pi-agent-desktop/releases).
+
+- Windows: `.exe` installer
+- macOS: `.dmg` and `.zip`
+- Linux: `.AppImage`
+
 ## Scripts
 
 ```bash

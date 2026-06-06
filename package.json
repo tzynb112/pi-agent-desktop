@@ -62,7 +62,7 @@
     "webpack-cli": "^5.1.0",
     "webpack-dev-server": "^4.15.0"
   },
-    "build": {
+  "build": {
     "appId": "com.tzynb112.piagentdesktop",
     "productName": "Pi Agent Desktop",
     "directories": {
@@ -75,6 +75,11 @@
       "LICENSE"
     ],
     "asar": true,
+    "publish": [
+      {
+        "provider": "github"
+      }
+    ],
     "win": {
       "target": [
         {
@@ -86,7 +91,24 @@
       ],
       "artifactName": "${productName}-${version}-${arch}.${ext}",
       "sign": false,
-      "signAndEditExecutable": false
+      "signAndEditExecutable": false,
+      "icon": "dist/main/icon.png"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "identity": null,
+      "hardenedRuntime": false,
+      "icon": "dist/main/icon.png"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Development",
+      "icon": "dist/main/icon.png"
     },
     "nsis": {
       "oneClick": false,
@@ -94,6 +116,15 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "deleteAppDataOnUninstall": false
+    },
+    "dmg": {
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "appImage": {
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "toolsets": {
+      "appimage": "1.0.3"
     }
   }
 }
