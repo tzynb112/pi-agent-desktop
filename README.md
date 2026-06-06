@@ -1,17 +1,13 @@
-# PianoAgent
+# Pi Agent Desktop
 
-Electron + React + TypeScript desktop app for chat-driven coding, file operations, tool execution, and goal queue workflows.
+Unofficial desktop client for the open-source Pi coding agent.
 
 ## Quick Start
 
-1. Double-click `start.bat`.
-2. Or run:
+1. Install dependencies with `npm install`.
+2. Run the app with `npm run start` or double-click `start.bat` on Windows.
 
-```bash
-npm run start
-```
-
-The app starts the renderer on `http://localhost:9000` and opens the Electron window once the main process is ready.
+The renderer runs on `http://localhost:9000` during development.
 
 ## Scripts
 
@@ -25,23 +21,21 @@ npm test
 - `start`: runs the renderer dev server and Electron main process together
 - `build`: builds the renderer bundle and the Electron main bundle
 - `typecheck`: runs TypeScript without emitting files
-- `test`: runs `verify_all.py`
+- `test`: runs the TypeScript typecheck
 
 ## Project Layout
 
 - `src/main/`: Electron main process, IPC handlers, file access, tool execution, persistence
 - `src/renderer/`: React UI, chat flow, goal runtime, settings, file tree, styles
-- `dist/`: build output
+- `src/shared/`: shared IPC types and workflow logic
 
 Key entry points:
 
 - `src/main/main.ts`
 - `src/main/preload.ts`
 - `src/renderer/index.tsx`
-- `src/renderer/index.html`
 
 ## Notes
 
 - `src/renderer/index.html` is the renderer template used by webpack.
-- `node_modules/`, `dist/`, logs, and local tool directories are ignored from version control.
-- Local Codex workspace data lives under `.arts/` and `.codeartsdoer/` and is treated as environment state, not product code.
+- `node_modules/` and `dist/` are build outputs and stay out of version control.

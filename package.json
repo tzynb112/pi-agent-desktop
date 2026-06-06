@@ -1,7 +1,7 @@
 {
-  "name": "electron-react-ide",
+  "name": "pi-agent-desktop",
   "version": "1.0.0",
-  "description": "VS Code style Electron + React + TypeScript IDE",
+  "description": "Unofficial desktop client for the open-source Pi coding agent",
   "main": "dist/main/main.js",
   "scripts": {
     "start": "concurrently \"npm run dev:renderer\" \"npm run dev:main\"",
@@ -12,7 +12,7 @@
     "prebuild": "npm run clean:dist",
     "build": "webpack --config webpack.renderer.config.js --mode production && tsc -p tsconfig.main.json",
     "typecheck": "tsc --noEmit",
-    "test": "python verify_all.py"
+    "test": "npm run typecheck"
   },
   "keywords": [
     "electron",
