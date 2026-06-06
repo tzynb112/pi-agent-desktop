@@ -1,6 +1,6 @@
 {
   "name": "pi-agent-desktop",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "description": "Unofficial desktop client for the open-source Pi coding agent",
   "main": "dist/main/main.js",
   "scripts": {
