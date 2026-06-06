@@ -2,6 +2,13 @@
 
 Unofficial desktop client for the open-source Pi coding agent.
 
+## Download
+
+- [GitHub Releases](https://github.com/tzynb112/pi-agent-desktop/releases/tag/v1.0.3)
+- [Windows installer](https://github.com/tzynb112/pi-agent-desktop/releases/download/v1.0.3/Pi-Agent-Desktop-1.0.3-x64.exe)
+- [macOS DMG](https://github.com/tzynb112/pi-agent-desktop/releases/download/v1.0.3/Pi-Agent-Desktop-1.0.3-arm64.dmg)
+- [Linux AppImage](https://github.com/tzynb112/pi-agent-desktop/releases/download/v1.0.3/Pi-Agent-Desktop-1.0.3.AppImage)
+
 ## Quick Start
 
 1. Install dependencies with `npm install`.
