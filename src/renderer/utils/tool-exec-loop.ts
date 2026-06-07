@@ -60,6 +60,7 @@ export function processToolResult(
     finalResult += "\n\n[CIRCUIT BREAKER] STOP! You have failed " + state.consecutiveFailures +
       " times in a row. Do NOT retry the same operation. Instead: 1) Analyze what went wrong, " +
       "2) Try a completely different approach, 3) If you cannot proceed, summarize what you have accomplished so far and stop.";
+    shouldBreak = true;
   }
 
   // Loop detection: track recent tool calls

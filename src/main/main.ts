@@ -1041,7 +1041,7 @@ async function startMcpServer(server: McpServerConfig): Promise<void> {
     const initResult = await sendRequest('initialize', {
       protocolVersion: '2024-11-05',
       capabilities: {},
-      clientInfo: { name: 'PianoAgent', version: '1.0.7' }
+      clientInfo: { name: 'PianoAgent', version: '1.0.8' }
     });
     
     const initializedNotification = {
@@ -2051,6 +2051,33 @@ ipcMain.handle('execute-tool', async (_event: any, toolName: string, args: strin
           } else {
             return { success: false, error: result.error || 'Failed to fetch URL' };
           }
+        } catch (err: any) {
+          return { success: false, error: err.message };
+        }
+      }
+
+      case 'search': {
+        const query = parsedArgs.query;
+        if (!query) return { success: false, error: 'Missing query argument' };
+        try {
+          const { searchDuckDuckGo } = require('./web-scraper');
+          const result = await searchDuckDuckGo(query, {
+            maxResults: parsedArgs.max_results || 5,
+          });
+          if (result.success) {
+            const results = Array.isArray(result.results) ? result.results : [];
+            const output = results.length > 0
+              ? results.map((item: any, index: number) => {
+                  let text = `${index + 1}. ${item.title}\nURL: ${item.url}`;
+                  if (item.snippet) {
+                    text += `\nSnippet: ${item.snippet}`;
+                  }
+                  return text;
+                }).join('\n\n')
+              : `No search results found for: ${query}`;
+            return { success: true, result: output };
+          }
+          return { success: false, error: result.error || 'Search failed' };
         } catch (err: any) {
           return { success: false, error: err.message };
         }

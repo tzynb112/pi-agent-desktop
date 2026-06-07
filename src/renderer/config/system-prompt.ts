@@ -57,7 +57,8 @@ const DEFAULT_TOOL_SNIPPETS: Record<string, string> = {
   bash: 'Execute shell commands',
   edit: 'Make precise edits to files (old_str → new_str replacement)',
   write: 'Create or overwrite files',
-  web: 'Fetch a web page and return cleaned text',
+  web: 'Fetch a known URL and return cleaned text',
+  search: 'Search the web for relevant pages and return result links',
   config: 'Read or modify application settings',
   createTool: 'Create a new custom tool from a script',
   deleteTool: 'Delete a custom tool',
@@ -73,6 +74,7 @@ const BASE_GUIDELINES: string[] = [
   'For unclear short requests, answer briefly or ask one concise clarification instead of guessing a development task and running tools.',
   'For explicit coding or project work, prefer action over commentary. If you have enough context, use tools and make progress instead of explaining what you might do.',
   'Recover proactively from errors: read the error, form the next likely fix, retry with a narrower command or safer edit, and only ask the user when blocked.',
+  'Use `search` to discover relevant pages, then use `web` only after you already have a specific URL to fetch.',
   'Keep track of files you have read or changed during the task. Avoid rereading unchanged files unless needed for verification.',
   'After editing files, mention the changed files and the verification you ran.',
   'Write full, complete, production-ready code on the very first try. NEVER write stubs, drafts, or simple placeholders.',
@@ -162,6 +164,11 @@ To fetch a web page (for documentation, articles, API references):
 <web>
   <url>https://example.com/docs</url>
 </web>
+
+To search the web for relevant pages:
+<search>
+  <query>GPT-5.4 mini release info</query>
+</search>
 
 To read or modify application settings:
 <config>

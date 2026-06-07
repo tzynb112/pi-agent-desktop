@@ -87,7 +87,7 @@ export const TOOLS_DEFINITION = [
     type: 'function',
     function: {
       name: 'web',
-      description: 'Fetch a web page and return cleaned text content. Strips ads, navigation, scripts. Useful for reading documentation, articles, and API references.',
+      description: 'Fetch a known URL and return cleaned text content. Strips ads, navigation, scripts. Useful for reading documentation, articles, and API references after you already know the URL.',
       parameters: {
         type: 'object',
         properties: {
@@ -105,6 +105,27 @@ export const TOOLS_DEFINITION = [
           },
         },
         required: ['url'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search',
+      description: 'Search the web for a query and return a short list of relevant result links and snippets.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'The search query to look up on the web',
+          },
+          max_results: {
+            type: 'number',
+            description: 'Maximum number of results to return (default: 5)',
+          },
+        },
+        required: ['query'],
       },
     },
   },
