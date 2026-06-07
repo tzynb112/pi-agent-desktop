@@ -927,11 +927,13 @@ const App: React.FC = () => {
 
   const buildSystemPrompt = useCallback(() => {
     const mergedCustom = [apiSettings.customSystemPrompt, pianoConfigPrompt].filter(Boolean).join('\n\n');
+    const enabledBuiltInTools = Object.entries(apiSettings.enabledTools || { read: true, bash: true, edit: true, write: true })
+      .filter(([, v]) => v)
+      .map(([k]) => k);
+    const alwaysAvailableTools = ['web', 'config', 'createTool', 'deleteTool', 'listTools', 'executeCustomTool'];
     return buildSystemPromptFromConfig({
       agentName: apiSettings.agentName || 'PianoAgent',
-      selectedTools: Object.entries(apiSettings.enabledTools || { read: true, bash: true, edit: true, write: true })
-        .filter(([, v]) => v)
-        .map(([k]) => k),
+      selectedTools: Array.from(new Set([...enabledBuiltInTools, ...alwaysAvailableTools])),
       customSystemPrompt: mergedCustom || undefined,
       skills: apiSettings.skills ?? [],
       projectContextFiles,
@@ -982,9 +984,10 @@ const App: React.FC = () => {
       updatedAt: Date.now(),
       model: apiSettings.model,
     };
-    saveConversations([newConv, ...conversations]);
+    const currentConversations = conversationsRef.current;
+    saveConversations([newConv, ...currentConversations]);
     setActiveConversationId(id);
-  }, [conversations, saveConversations, apiSettings.model]);
+  }, [saveConversations, apiSettings.model]);
 
   const handleSelectConversation = useCallback((id: string) => {
     setActiveConversationId(id);
@@ -992,7 +995,7 @@ const App: React.FC = () => {
 
   const handleDeleteConversation = useCallback(
     (id: string) => {
-      const updated = conversations.filter((c) => c.id !== id);
+      const updated = conversationsRef.current.filter((c) => c.id !== id);
       saveConversations(updated);
       if (activeConversationId === id) {
         setActiveConversationId(updated.length > 0 ? updated[0].id : null);
@@ -1005,7 +1008,7 @@ const App: React.FC = () => {
       }
       setGoalQueue(removeGoalQueueItemsForConversation(id));
     },
-    [conversations, activeConversationId, currentGoalConversationId, saveConversations]
+    [activeConversationId, currentGoalConversationId, saveConversations]
   );
 
   const handleResumeGoal = useCallback(() => {
@@ -2182,7 +2185,13 @@ return false; // Not handled
         const latestUserContentForToolGate = [...getActiveBranchMessages(activeConvForToolGate)]
           .reverse()
           .find((m: ChatMessage) => m.role === 'user' && !m.content.startsWith('Tool '))?.content || '';
-        const allowToolCallsForTurn = shouldAllowToolCallsForUserInput(content || latestUserContentForToolGate);
+        const hasRecentToolActivity = !!activeConvForToolGate && activeConvForToolGate.messages.slice(-6).some((m) => {
+          if (m.toolCalls && m.toolCalls.length > 0) return true;
+          if (m.id.startsWith('tool_res_')) return true;
+          return typeof m.content === 'string' && m.content.startsWith('Tool ');
+        });
+        const allowToolCallsForTurn =
+          shouldAllowToolCallsForUserInput(content || latestUserContentForToolGate) || hasRecentToolActivity;
 
         while (step < MAX_STEPS && isStreamingRef.current) {
           const activeConv = currentConvs.find((c: Conversation) => c.id === convId) || null;
@@ -2335,11 +2344,14 @@ return false; // Not handled
           }
 
           const displayContent = sanitizeAssistantDisplayContent(fullResponse);
+          const displayReasoning = streamedResponse.reasoningContent
+            ? sanitizeAssistantDisplayContent(streamedResponse.reasoningContent)
+            : undefined;
 
           // Update assistant message with content and reasoningContent
           updateAssistantMessage({
             content: displayContent,
-            reasoningContent: undefined,
+            reasoningContent: displayReasoning,
             toolCalls: toolCalls.map(t => ({ ...t })),
             isStreaming: false,
           }, true);
@@ -2748,7 +2760,7 @@ return false; // Not handled
     let convId = activeConversationId;
     if (!convId) return;
 
-    let localConversations = [...conversations];
+    let localConversations = [...conversationsRef.current];
     const conv = localConversations.find((c) => c.id === convId);
     if (!conv) return;
 
@@ -2777,13 +2789,13 @@ return false; // Not handled
     saveConversations(localConversations);
 
     await handleSend("", undefined, newMsg.id);
-  }, [conversations, activeConversationId, saveConversations, handleSend]);
+  }, [activeConversationId, saveConversations, handleSend]);
 
   const regenerateResponse = useCallback(async (msgId: string) => {
     let convId = activeConversationId;
     if (!convId) return;
 
-    let localConversations = [...conversations];
+    let localConversations = [...conversationsRef.current];
     const conv = localConversations.find((c) => c.id === convId);
     if (!conv) return;
 
@@ -2793,7 +2805,7 @@ return false; // Not handled
     if (originalMsg.parentId) {
       await handleSend("", undefined, originalMsg.parentId);
     }
-  }, [conversations, activeConversationId, handleSend]);
+  }, [activeConversationId, handleSend]);
 
   const handleOpenFolder = async () => {
     if (window.electronAPI) {

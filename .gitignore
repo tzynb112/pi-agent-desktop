@@ -1,12 +1,12 @@
 node_modules/
 dist/
-release/
-__pycache__/
-.pytest_cache/
-*.pyc
 *.log
 *.restored
 scratch_*.txt
 recovered_*.ts
 .arts/
 .codeartsdoer/
+
+.gemini/
+release/
+.DS_Store

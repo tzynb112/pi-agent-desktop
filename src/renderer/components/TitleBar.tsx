@@ -1,6 +1,7 @@
-﻿import React, { memo } from 'react';
+import React, { memo } from 'react';
 import { useTheme } from '../contexts/ThemeContext';
 import { Moon, Sun, Settings } from 'lucide-react';
+import appIcon from '../../main/icon.png';
 
 interface TitleBarProps {
   onSettingsClick?: () => void;
@@ -20,11 +21,7 @@ const TitleBar: React.FC<TitleBarProps> = ({ onSettingsClick, agentName, modelNa
     <div className="titlebar glass">
       <div className="titlebar-left">
         <div className="titlebar-brand">
-          <div className="titlebar-logo logo-glow">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M8 20V4h6.5a4.5 4.5 0 0 1 0 9H8" />
-            </svg>
-          </div>
+          <img className="titlebar-logo logo-glow" src={appIcon} alt="" aria-hidden="true" />
           <div className="titlebar-info">
             <span className="titlebar-name">{agentName || 'PianoAgent'}</span>
             <div className="titlebar-meta">

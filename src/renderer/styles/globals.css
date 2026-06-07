@@ -1475,13 +1475,45 @@ code[class*="language-"] {
 }
 
 
-
 /* ====== PI CLI POLISH - MESSAGE BUBBLE CLASSES ====== */
+
+.assistant-bubble,
+.user-bubble {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid transparent;
+  box-sizing: border-box;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+
+
+.assistant-bubble {
+  background: var(--assistant-bubble);
+  border-color: var(--assistant-border);
+  box-shadow: var(--shadow-sm), var(--shadow-glow);
+  align-self: flex-start;
+}
+
+
+
+.user-bubble {
+  background: var(--user-bubble);
+  border-color: var(--user-border);
+  box-shadow: var(--shadow-sm);
+  align-self: flex-end;
+}
 
 .msg-row {
   display: flex;
   gap: 10px;
   align-items: flex-start;
+  width: 100%;
 }
 
 
@@ -2620,11 +2652,9 @@ code[class*="language-"] {
   width: 48px;
   height: 48px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #38bdf8, #818cf8);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: block;
   margin-bottom: 16px;
+  object-fit: cover;
 }
 
 
@@ -3505,12 +3535,9 @@ code[class*="language-"] {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #38bdf8, #818cf8);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
+  display: block;
   box-shadow: 0 2px 6px rgba(56, 189, 248, 0.2);
+  object-fit: cover;
 }
 
 

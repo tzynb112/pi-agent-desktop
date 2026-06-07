@@ -57,13 +57,19 @@ const DEFAULT_TOOL_SNIPPETS: Record<string, string> = {
   bash: 'Execute shell commands',
   edit: 'Make precise edits to files (old_str → new_str replacement)',
   write: 'Create or overwrite files',
+  web: 'Fetch a web page and return cleaned text',
+  config: 'Read or modify application settings',
+  createTool: 'Create a new custom tool from a script',
+  deleteTool: 'Delete a custom tool',
+  listTools: 'List all custom tools',
+  executeCustomTool: 'Execute a custom tool by name',
 };
 
 /** Default guidelines that always appear */
 const BASE_GUIDELINES: string[] = [
   'Be concise in your responses. Keep thoughts and explanations very short to speed up execution.',
   'Classify the user intent before acting. Treat greetings, acknowledgements, short phrases, casual chat, and ambiguous one-word messages as conversation unless the user explicitly asks to inspect, create, edit, run, test, open, search, or debug something.',
-  'Use tools only when they are necessary for the user request. Do not call read, bash, edit, write, web, or config for ordinary conversation, greetings, quick confirmations, or vague probes like "hello", "ok", or "smoke".',
+  'Use tools only when they are necessary for the user request. Do not call read, bash, edit, write, web, config, createTool, deleteTool, listTools, or executeCustomTool for ordinary conversation, greetings, quick confirmations, or vague probes like "hello", "ok", or "smoke".',
   'For unclear short requests, answer briefly or ask one concise clarification instead of guessing a development task and running tools.',
   'For explicit coding or project work, prefer action over commentary. If you have enough context, use tools and make progress instead of explaining what you might do.',
   'Recover proactively from errors: read the error, form the next likely fix, retry with a narrower command or safer edit, and only ask the user when blocked.',
@@ -79,7 +85,7 @@ const BASE_GUIDELINES: string[] = [
 export function buildSystemPrompt(options: SystemPromptOptions = {}): string {
   const {
     agentName = 'PianoAgent',
-    selectedTools = ['read', 'bash', 'edit', 'write'],
+    selectedTools = Object.keys(DEFAULT_TOOL_SNIPPETS),
     toolSnippets = DEFAULT_TOOL_SNIPPETS,
     promptGuidelines = [],
     customSystemPrompt,
@@ -178,6 +184,20 @@ To create a new custom tool (the AI can extend itself!):
   <script>const args = JSON.parse(process.env.TOOL_ARGS); /* tool logic here */</script>
   <language>javascript</language>
 </createTool>
+
+To list custom tools:
+<listTools></listTools>
+
+To execute a custom tool:
+<executeCustomTool>
+  <name>search-github</name>
+  <arguments>{"query":"openai docs"}</arguments>
+</executeCustomTool>
+
+To delete a custom tool:
+<deleteTool>
+  <name>search-github</name>
+</deleteTool>
 
 Always use ABSOLUTE paths when possible. On Windows use D:\\folder\\file, on Unix use /home/user/file.`;
 

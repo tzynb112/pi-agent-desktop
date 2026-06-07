@@ -1,32 +1,16 @@
-name: Build and Release
+name: Release
 
 on:
   push:
     tags:
-      - 'v*'
-  workflow_dispatch:
+      - "v*"
 
 permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            target: win nsis --x64
-          - os: macos-latest
-            target: mac
-          - os: ubuntu-latest
-            target: linux AppImage
-
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+  build-and-release:
+    runs-on: windows-latest
 
     steps:
       - name: Checkout
@@ -35,14 +19,21 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: "20"
           cache: npm
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Build app bundles
-        run: npm run build
+      - name: Build Windows package
+        run: npm run package:win
 
-      - name: Package and publish
-        run: npx electron-builder --${{ matrix.target }} --publish always
+      - name: Upload GitHub Release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            release/*.exe
+            release/*.blockmap

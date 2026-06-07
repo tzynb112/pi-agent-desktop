@@ -6,6 +6,7 @@ import GoalQueuePanel from './GoalQueuePanel';
 import type { Goal, Agent } from '../../../shared/goal-executor';
 import type { GoalQueueItem, GoalRunMeta } from '../../types';
 import { Rocket, Search, Target } from 'lucide-react';
+import appIcon from '../../../main/icon.png';
 
 interface ChatAreaProps {
   conversation: Conversation | null;
@@ -134,11 +135,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   if (!conversation || activeMessages.length === 0) {
     return (
       <div className="chat-welcome">
-        <div className="chat-welcome-logo logo-glow">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M8 20V4h6.5a4.5 4.5 0 0 1 0 9H8" />
-          </svg>
-        </div>
+        <img className="chat-welcome-logo logo-glow" src={appIcon} alt="" aria-hidden="true" />
 
         <h2 className="chat-welcome-title">{agentName}</h2>
         <p className="chat-welcome-subtitle">AI 编程助手 · 在下方输入消息或使用快捷操作</p>

@@ -1,7 +1,7 @@
 {
-  "name": "pi-agent-desktop",
-  "version": "1.0.3",
-  "description": "Unofficial desktop client for the open-source Pi coding agent",
+  "name": "electron-react-ide",
+  "version": "1.0.5",
+  "description": "VS Code style Electron + React + TypeScript IDE",
   "main": "dist/main/main.js",
   "scripts": {
     "start": "concurrently \"npm run dev:renderer\" \"npm run dev:main\"",
@@ -9,12 +9,11 @@
     "predev:main": "npm run clean:dist",
     "dev:main": "cross-env NODE_ENV=development tsc -p tsconfig.main.json && cross-env NODE_ENV=development electron dist/main/main.js",
     "clean:dist": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
-    "copy:main-assets": "node -e \"const fs=require('fs'); fs.mkdirSync('dist/main',{recursive:true}); fs.copyFileSync('src/main/icon.png','dist/main/icon.png')\"",
     "prebuild": "npm run clean:dist",
-    "build": "webpack --config webpack.renderer.config.js --mode production && tsc -p tsconfig.main.json && npm run copy:main-assets",
+    "build": "webpack --config webpack.renderer.config.js --mode production && tsc -p tsconfig.main.json",
+    "package:win": "npm run build && electron-builder --win nsis portable --publish never",
     "typecheck": "tsc --noEmit",
-    "test": "npm run typecheck",
-    "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never"
+    "test": "python verify_all.py"
   },
   "keywords": [
     "electron",
@@ -28,6 +27,24 @@
   "sideEffects": [
     "*.css"
   ],
+  "build": {
+    "appId": "com.tzynb112.pianoagentdesktop",
+    "productName": "PianoAgent Desktop",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    }
+  },
   "dependencies": {
     "clsx": "^2.1.1",
     "lucide-react": "^1.16.0",
@@ -50,7 +67,7 @@
     "cross-env": "^7.0.3",
     "css-loader": "^6.8.0",
     "electron": "^28.0.0",
-    "electron-builder": "^25.1.8",
+    "electron-builder": "^26.15.0",
     "html-webpack-plugin": "^5.5.0",
     "postcss": "^8.5.15",
     "postcss-loader": "^8.2.1",
@@ -61,64 +78,5 @@
     "webpack": "^5.89.0",
     "webpack-cli": "^5.1.0",
     "webpack-dev-server": "^4.15.0"
-  },
-  "build": {
-    "appId": "com.tzynb112.piagentdesktop",
-    "productName": "Pi Agent Desktop",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist/**/*",
-      "package.json",
-      "README.md",
-      "LICENSE"
-    ],
-    "asar": true,
-    "publish": [
-      {
-        "provider": "github"
-      }
-    ],
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "artifactName": "${productName}-${version}-${arch}.${ext}",
-      "sign": false,
-      "signAndEditExecutable": false,
-      "icon": "dist/main/icon.png"
-    },
-    "mac": {
-      "target": [
-        "dmg",
-        "zip"
-      ],
-      "identity": null,
-      "hardenedRuntime": false,
-      "icon": "dist/main/icon.png"
-    },
-    "linux": {
-      "target": [
-        "AppImage"
-      ],
-      "category": "Development",
-      "icon": "dist/main/icon.png"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "deleteAppDataOnUninstall": false
-    },
-    "dmg": {
-      "artifactName": "${productName}-${version}-${arch}.${ext}"
-    }
   }
 }
