@@ -57,7 +57,7 @@ export function processToolResult(
   // Loop detection: track recent tool calls
   const tcSig = tc.name + ":" + (tc.arguments || "").substring(0, 100);
   state.recentToolCalls.push({ name: tc.name, args: tcSig });
-  if (state.recentToolCalls.length > 10) state.recentToolCalls.shift();
+  if (state.recentToolCalls.length > 20) state.recentToolCalls.shift();
   const recentSameType = state.recentToolCalls.filter(t => t.name === tc.name).length;
 
   // Duplicate call detection: same tool + same args
@@ -90,12 +90,15 @@ export function processToolResult(
   }
 
   // Circuit breaker: too many same-type calls
-  if (recentSameType >= CIRCUIT_BREAKER_LOOP_LIMIT) {
+  const isBulkTool = tc.name === 'write' || tc.name === 'read' || tc.name === 'bash' || tc.name === 'edit';
+  const loopLimit = isBulkTool ? 15 : CIRCUIT_BREAKER_LOOP_LIMIT;
+  
+  if (recentSameType >= loopLimit) {
     finalResult += "\n\n[CIRCUIT BREAKER] EMERGENCY STOP! You have called " + "'" + tc.name + "'" +
-      " " + recentSameType + " times in a row. This is a loop. You MUST stop calling tools immediately and return a summary of what you have done so far.";
+      " " + recentSameType + " times recently. This is a loop. You MUST stop calling tools immediately and return a summary of what you have done so far.";
     shouldBreak = true;
     state.recentToolCalls.length = 0;
-  } else if (recentSameType >= 3 && !isToolErrorResult(rawResult)) {
+  } else if (recentSameType >= (isBulkTool ? 10 : 3) && !isToolErrorResult(rawResult)) {
     finalResult += "\n\n[Loop Detection] You have called " + "'" + tc.name + "'" +
       " " + recentSameType + " times recently. If you are stuck, try a completely different approach or ask the user for clarification.";
   }

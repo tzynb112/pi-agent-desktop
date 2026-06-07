@@ -6,11 +6,11 @@ Pi Agent Desktop 是一个面向通用用户的桌面客户端，基于开源 Pi
 
 ## Download / 下载
 
-Current release: `v1.0.12`
+Current release: `v1.0.13`
 
 - GitHub Releases: [Latest release](https://github.com/tzynb112/pi-agent-desktop/releases/latest)
-- Windows installer: [PianoAgent Desktop Setup 1.0.12.exe](https://github.com/tzynb112/pi-agent-desktop/releases/download/v1.0.12/PianoAgent.Desktop.Setup.1.0.12.exe)
-- Windows portable: [PianoAgent Desktop 1.0.12.exe](https://github.com/tzynb112/pi-agent-desktop/releases/download/v1.0.12/PianoAgent.Desktop.1.0.12.exe)
+- Windows installer: [PianoAgent Desktop Setup 1.0.13.exe](https://github.com/tzynb112/pi-agent-desktop/releases/download/v1.0.13/PianoAgent.Desktop.Setup.1.0.13.exe)
+- Windows portable: [PianoAgent Desktop 1.0.13.exe](https://github.com/tzynb112/pi-agent-desktop/releases/download/v1.0.13/PianoAgent.Desktop.1.0.13.exe)
 - Source build: `npm run start`
 
 ## Quick Start / 快速开始
