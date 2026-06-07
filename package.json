@@ -1,6 +1,6 @@
 {
   "name": "electron-react-ide",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "VS Code style Electron + React + TypeScript IDE",
   "main": "dist/main/main.js",
   "scripts": {
@@ -11,7 +11,7 @@
     "clean:dist": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "prebuild": "npm run clean:dist",
     "build": "webpack --config webpack.renderer.config.js --mode production && tsc -p tsconfig.main.json",
-    "package:win": "npm run build && electron-builder --win nsis portable",
+    "package:win": "npm run build && electron-builder --win nsis portable --publish never",
     "typecheck": "tsc --noEmit",
     "test": "python verify_all.py"
   },
