@@ -20,6 +20,8 @@ checks = {
         ("reserveGuiLaunchTarget", "GUI launch duplicate guard shared helper"),
         ("markGuiLaunchSucceeded", "GUI launch tracker success cleanup"),
         ("markGuiLaunchFailed", "GUI launch tracker failure cleanup"),
+        ("buildDownloadSuccessMessage", "Download success messaging shared helper"),
+        ("isDownloadCommand", "Download command detection helper"),
     ],
     r"D:\UI交互开发\src\shared\goal-executor.ts": [
         ("function isToolErrorResult", "Bug #2+#6: shared isToolError"),
@@ -32,6 +34,10 @@ checks = {
         ("createGuiLaunchTracker", "GUI launch tracker state"),
         ("reserveGuiLaunchTarget", "GUI launch reservation guard"),
         ("buildDuplicateGuiLaunchMessage", "GUI launch duplicate response"),
+    ],
+    r"D:\UI交互开发\src\shared\command-feedback.ts": [
+        ("isDownloadCommand", "Download command detection state"),
+        ("buildDownloadSuccessMessage", "Download command success response"),
     ],
     r"D:\UI交互开发\src\renderer\utils\goal-executor.ts": [
         ("export * from '../../shared/goal-executor'", "Long workflow: renderer goal executor re-exports shared implementation"),
@@ -50,6 +56,7 @@ checks = {
     r"D:\UI交互开发\src\renderer\utils\tool-exec-loop.ts": [
         ("do NOT reset consecutiveFailures here", "Bug #4: circuit breaker"),
         ("extractGuiLaunchTarget", "GUI launch target extraction shared helper"),
+        ("buildDownloadSuccessMessage", "Download command success response"),
     ],
     r"D:\UI交互开发\src\renderer\utils\tool-execution.ts": [
         ("工具失败", "Bug #6: Chinese error pattern"),

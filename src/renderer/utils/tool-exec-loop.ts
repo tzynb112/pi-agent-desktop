@@ -9,6 +9,10 @@ import {
   extractGuiLaunchTarget,
   normalizeGuiLaunchTarget,
 } from "../../shared/gui-launch-detection";
+import {
+  buildDownloadSuccessMessage,
+  isDownloadCommand,
+} from "../../shared/command-feedback";
 
 /** Default circuit breaker thresholds */
 export const CIRCUIT_BREAKER_FAILURE_LIMIT = 3;
@@ -91,6 +95,10 @@ export function processToolResult(
         shouldBreak = true;
       }
     }
+  }
+
+  if (tc.name === 'bash' && !isToolErrorResult(rawResult) && isDownloadCommand(tc.arguments || '')) {
+    finalResult = buildDownloadSuccessMessage(tc.arguments || '', finalResult);
   }
 
   // Circuit breaker: too many same-type calls

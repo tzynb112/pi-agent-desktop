@@ -48,6 +48,10 @@ import {
   type GuiLaunchTracker,
 } from '../shared/gui-launch-detection';
 import {
+  buildDownloadSuccessMessage,
+  isDownloadCommand,
+} from '../shared/command-feedback';
+import {
   defaultCache,
   apiCache,
   appStateCache,
@@ -1435,7 +1439,13 @@ async function executeGoalRunnerTool(toolName: string, args: string, toolCallId?
           markGuiLaunchSucceeded(guiLaunchTracker!, guiLaunchReservation.normalizedTarget);
           guiLaunchSucceeded = true;
         }
-        return isGuiLaunchCommand(command) ? buildGuiLaunchSuccessMessage(output) : output;
+        if (isGuiLaunchCommand(command)) {
+          return buildGuiLaunchSuccessMessage(output);
+        }
+        if (isDownloadCommand(command)) {
+          return buildDownloadSuccessMessage(command, output);
+        }
+        return output;
       }
       default:
         return `Error: Unknown goal tool: ${toolName}`;
@@ -2024,6 +2034,10 @@ ipcMain.handle('execute-tool', async (_event: any, toolName: string, args: strin
           // so the LLM doesn't misinterpret the result as failure and retry.
           if (isGuiLaunchCommand(command) && exitResult.code === 0) {
             return { success: true, result: buildGuiLaunchSuccessMessage(combinedOutput) };
+          }
+
+          if (isDownloadCommand(command) && exitResult.code === 0) {
+            return { success: true, result: buildDownloadSuccessMessage(command, combinedOutput) };
           }
 
           return { success: true, result: combinedOutput };
