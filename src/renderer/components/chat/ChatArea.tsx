@@ -5,6 +5,7 @@ import GoalStatus from './GoalStatus';
 import GoalQueuePanel from './GoalQueuePanel';
 import type { Goal, Agent } from '../../../shared/goal-executor';
 import type { GoalQueueItem, GoalRunMeta } from '../../types';
+import { isRenderableChatMessage } from '../../utils/message-visibility';
 import { Rocket, Search, Target } from 'lucide-react';
 import appIcon from '../../../main/icon.png';
 
@@ -69,7 +70,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   );
 
   const filteredMessages = useMemo(
-    () => activeMessages.filter(msg => !msg.id.startsWith('tool_res_')),
+    () => activeMessages.filter(isRenderableChatMessage),
     [activeMessages]
   );
 
@@ -176,7 +177,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
   const renderMessage = (msg: ChatMessage, idx: number) => {
     const siblings = conversation
-      ? conversation.messages.filter((m) => m.parentId === msg.parentId)
+      ? conversation.messages.filter((m) => m.parentId === msg.parentId && isRenderableChatMessage(m))
       : [];
     const siblingCount = siblings.length;
     const siblingIndex = siblings.findIndex((s) => s.id === msg.id);

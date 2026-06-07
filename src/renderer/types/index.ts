@@ -42,6 +42,7 @@ export interface ChatMessage {
   isStreaming?: boolean;
   parentId?: string;
   reasoningContent?: string;
+  hidden?: boolean;
 }
 
 export interface Conversation {

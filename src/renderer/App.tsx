@@ -2401,6 +2401,7 @@ return false; // Not handled
               ),
               timestamp: Date.now(),
               parentId: assistantMsgId,
+              hidden: true,
             };
 
             currentConvs = currentConvs.map((c: Conversation) => {
