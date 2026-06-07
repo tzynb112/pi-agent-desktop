@@ -2422,14 +2422,12 @@ return false; // Not handled
             }
           }
 
-          if (!isStreamingRef.current || toolExecState.circuitBroken) break;
-
           const activeConvForTool = currentConvs.find((c: Conversation) => c.id === convId) || null;
           const currentLeafForTool = activeConvForTool?.activeMessageId;
 
           // Append tool result virtual message
           const toolResultsMessage: ChatMessage = {
-            id: `tool_res_${Date.now()}`,
+            id: `tool_res_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
             role: 'user',
             content: localToolCalls.map((tc) => `Tool ${tc.name} result:\n${tc.result}`).join('\n\n'),
             timestamp: Date.now(),
@@ -2449,6 +2447,32 @@ return false; // Not handled
           });
           conversationsRef.current = currentConvs;
           saveConversations(currentConvs);
+
+          if (!isStreamingRef.current || toolExecState.circuitBroken) {
+            if (toolExecState.circuitBroken) {
+              const circuitMsg: ChatMessage = {
+                id: `msg_circuit_break_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                role: 'assistant',
+                content: `⚠️ 任务被系统拦截。原因：检测到重复或无效的工具调用死循环。\n\n由于大模型陷入了死循环重复调用同一工具，为了防止持续消耗 Token，系统已强制暂停。建议你向我指出错误原因，或换一种思路继续。`,
+                timestamp: Date.now(),
+                parentId: toolResultsMessage.id,
+              };
+              currentConvs = currentConvs.map((c: Conversation) => {
+                if (c.id === convId) {
+                  return {
+                    ...c,
+                    messages: [...c.messages, circuitMsg],
+                    activeMessageId: circuitMsg.id,
+                    updatedAt: Date.now()
+                  };
+                }
+                return c;
+              });
+              conversationsRef.current = currentConvs;
+              saveConversations(currentConvs);
+            }
+            break;
+          }
 
           step++;
         }
