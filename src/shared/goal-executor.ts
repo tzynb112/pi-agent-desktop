@@ -338,7 +338,7 @@ Rules:
   ];
   const actionsTaken: Array<{ tool: string; success: boolean; target: string; content?: string; oldStr?: string; newStr?: string }> = [];
   const recentSignatures: string[] = [];
-  const maxSteps = 30;
+  const maxSteps = 50;
   let finalAssistantResponse = '';
 
   for (let step = 0; step < maxSteps; step++) {

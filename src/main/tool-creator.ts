@@ -138,7 +138,7 @@ export function executeCustomTool(name: string, args: Record<string, any>): Prom
 
       const child = spawn(cmd, cmdArgs, {
         env,
-        timeout: 30000,
+        timeout: 120000,
         windowsHide: true,
         shell: process.platform === 'win32',
       });

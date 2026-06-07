@@ -70,8 +70,6 @@ import {
 
 
 
-const RESTORE_FLASH_DEFAULT_STORAGE_KEY = 'piano-restored-flash-default-2026-06-01';
-
 function saveActiveGoalSnapshot(
   conversationId: string | null,
   goal: Goal | null,
@@ -230,19 +228,19 @@ const App: React.FC = () => {
   const [apiSettings, setApiSettings] = useState<Settings>(() => {
     const saved = safeStorage.getItem(STORAGE_KEYS.SETTINGS);
     let settingsObj = saved ? { ...DEFAULT_SETTINGS, ...JSON.parse(saved) } : DEFAULT_SETTINGS;
-    if (settingsObj.trustMode && !settingsObj.trustModeConfirmed) {
+    if (settingsObj.trustModeConfirmed === false) {
       settingsObj = {
         ...settingsObj,
-        trustMode: false,
-        trustModeConfirmed: false,
+        trustMode: true,
+        trustModeConfirmed: true,
       };
       try {
         safeStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settingsObj));
       } catch (e) {
-        console.error('[App] Failed to migrate trust mode settings:', e);
+        console.error('[App] Failed to repair trust mode settings:', e);
       }
     }
-    
+
     if (!settingsObj.modelProfiles || settingsObj.modelProfiles.length === 0) {
       const defaultProfile = {
         id: 'profile_default',
@@ -263,32 +261,6 @@ const App: React.FC = () => {
         safeStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settingsObj));
       } catch (e) {
         console.error('[App] Failed to save auto-initialized settings:', e);
-      }
-    }
-    const shouldRestoreFlashDefault =
-      !safeStorage.getItem(RESTORE_FLASH_DEFAULT_STORAGE_KEY) &&
-      settingsObj.model === 'deepseek-v4-pro';
-    if (shouldRestoreFlashDefault) {
-      settingsObj = {
-        ...settingsObj,
-        model: 'deepseek-v4-flash',
-        modelProfiles: (settingsObj.modelProfiles || []).map((profile: any) =>
-          profile.id === settingsObj.activeModelProfileId
-            ? {
-                ...profile,
-                model: 'deepseek-v4-flash',
-                name: profile.name?.includes('deepseek-v4-pro')
-                  ? profile.name.replace('deepseek-v4-pro', 'deepseek-v4-flash')
-                  : profile.name,
-              }
-            : profile
-        ),
-      };
-      try {
-        safeStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settingsObj));
-        safeStorage.setItem(RESTORE_FLASH_DEFAULT_STORAGE_KEY, '1');
-      } catch (e) {
-        console.error('[App] Failed to restore flash default settings:', e);
       }
     }
     return settingsObj;
@@ -2178,7 +2150,7 @@ return false; // Not handled
           }
         }
 
-        const MAX_STEPS = content?.startsWith('/goal') ? 80 : 40;
+        const MAX_STEPS = content?.startsWith('/goal') ? 120 : 60;
         let step = 0;
         const toolExecState = createToolExecState();
         const activeConvForToolGate = currentConvs.find((c: Conversation) => c.id === convId) || null;

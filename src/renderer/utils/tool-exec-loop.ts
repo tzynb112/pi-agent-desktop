@@ -7,9 +7,9 @@ import type { ToolCall } from "../types";
 import { truncateToolResult, isToolErrorResult, buildToolRecoveryHint } from "./tool-execution";
 
 /** Default circuit breaker thresholds */
-export const CIRCUIT_BREAKER_FAILURE_LIMIT = 3;
-export const CIRCUIT_BREAKER_LOOP_LIMIT = 5;
-export const DUPLICATE_CALL_LIMIT = 1;
+export const CIRCUIT_BREAKER_FAILURE_LIMIT = 5;
+export const CIRCUIT_BREAKER_LOOP_LIMIT = 8;
+export const DUPLICATE_CALL_LIMIT = 2;
 
 export interface ToolExecState {
   recentToolCalls: Array<{ name: string; args: string }>;

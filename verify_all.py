@@ -40,6 +40,9 @@ checks = {
     ],
     r"D:\UI交互开发\src\renderer\utils\tool-exec-loop.ts": [
         ("do NOT reset consecutiveFailures here", "Bug #4: circuit breaker"),
+        ("export const CIRCUIT_BREAKER_FAILURE_LIMIT = 5", "Bugfix: higher failure tolerance"),
+        ("export const CIRCUIT_BREAKER_LOOP_LIMIT = 8", "Bugfix: higher loop tolerance"),
+        ("export const DUPLICATE_CALL_LIMIT = 2", "Bugfix: higher duplicate tolerance"),
     ],
     r"D:\UI交互开发\src\renderer\utils\tool-execution.ts": [
         ("工具失败", "Bug #6: Chinese error pattern"),
@@ -47,6 +50,26 @@ checks = {
     r"D:\UI交互开发\src\renderer\utils\compactor.ts": [
         ("parentIds.has(m.id)", "Bug #8: branch preservation"),
         ("上下文压缩器", "Chinese strings fixed"),
+    ],
+    r"D:\UI交互开发\src\renderer\config\default-settings.ts": [
+        ("trustModeConfirmed: true", "Bugfix: trust mode stays enabled after opt-in"),
+        ("autoCompactionThreshold: 20000", "Bugfix: less aggressive auto-compaction"),
+    ],
+    r"D:\UI交互开发\src\renderer\utils\stream-handler.ts": [
+        ("const CHUNK_TIMEOUT_MS = 60_000;", "Bugfix: longer stream chunk timeout"),
+        ("const TOTAL_TIMEOUT_MS = 600_000;", "Bugfix: longer stream total timeout"),
+    ],
+    r"D:\UI交互开发\src\shared\goal-executor.ts": [
+        ("const maxSteps = 50;", "Bugfix: larger goal step budget"),
+    ],
+    r"D:\UI交互开发\src\main\main.ts": [
+        ("setTimeout(() => controller.abort(), 180_000)", "Bugfix: longer API timeout"),
+        ("setTimeout(() => controller.abort(), 600_000)", "Bugfix: longer streaming fetch timeout"),
+        ("timeout: 300000", "Bugfix: longer shell timeout"),
+        ("const MCP_REQUEST_TIMEOUT_MS = 120_000;", "Bugfix: longer MCP timeout"),
+    ],
+    r"D:\UI交互开发\src\main\tool-creator.ts": [
+        ("timeout: 120000", "Bugfix: longer custom tool timeout"),
     ],
 }
 
@@ -59,6 +82,10 @@ absent_checks = {
     r"D:\UI交互开发\src\main\goal-state.ts": [
         ("涓", "Long workflow: no common mojibake marker in persisted goal state"),
         ("鐩", "Long workflow: no common mojibake marker in persisted goal state"),
+    ],
+    r"D:\UI交互开发\src\renderer\App.tsx": [
+        ("settingsObj.trustMode && !settingsObj.trustModeConfirmed", "Bugfix: trust mode is no longer silently downgraded"),
+        ("shouldRestoreFlashDefault", "Bugfix: user-selected model is no longer forced back to flash"),
     ],
 }
 

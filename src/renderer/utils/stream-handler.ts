@@ -77,8 +77,8 @@ export async function streamOnce(params: StreamOnceParams): Promise<StreamedChat
     });
   };
   return new Promise<StreamedChatCompletion>((resolve, reject) => {
-    const CHUNK_TIMEOUT_MS = 30_000;
-    const TOTAL_TIMEOUT_MS = 300_000;
+    const CHUNK_TIMEOUT_MS = 60_000;
+    const TOTAL_TIMEOUT_MS = 600_000;
     let chunkTimer: NodeJS.Timeout | null = null;
     let totalTimer: NodeJS.Timeout | null = null;
 
@@ -95,7 +95,7 @@ export async function streamOnce(params: StreamOnceParams): Promise<StreamedChat
           cleanup();
           cleanupRaf();
           clearTimers();
-          const err = new Error('Stream chunk timeout: 30s no data') as Error & { status?: number; partialContent?: string };
+          const err = new Error('Stream chunk timeout: 60s no data') as Error & { status?: number; partialContent?: string };
           err.status = responseStatus;
           err.partialContent = fullResponse;
           reject(err);
@@ -109,7 +109,7 @@ export async function streamOnce(params: StreamOnceParams): Promise<StreamedChat
         cleanup();
         cleanupRaf();
         clearTimers();
-        const err = new Error('Stream total timeout: 5min exceeded') as Error & { status?: number; partialContent?: string };
+        const err = new Error('Stream total timeout: 10min exceeded') as Error & { status?: number; partialContent?: string };
         err.status = responseStatus;
         err.partialContent = fullResponse;
         reject(err);

@@ -46,6 +46,7 @@ export interface Settings {
   modelProfiles?: ModelProfile[];
   activeModelProfileId?: string;
   trustMode?: boolean;
+  trustModeConfirmed?: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -55,6 +56,7 @@ export const DEFAULT_SETTINGS: Settings = {
   temperature: 0.7,
   maxTokens: 4096,
   trustMode: true,
+  trustModeConfirmed: true,
   topP: 0.9,
   frequencyPenalty: 0,
   presencePenalty: 0,
@@ -81,7 +83,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoResumeGoals: false,
   autoResumeDelaySeconds: 8,
   goalSchedulerMaxConcurrent: 1,
-  autoCompactionThreshold: 12000,
+  autoCompactionThreshold: 20000,
   agentName: 'PianoAgent',
   accentColor: '#8b5cf6',
   interfaceDensity: 'comfortable',

@@ -1001,7 +1001,7 @@ async function startMcpServer(server: McpServerConfig): Promise<void> {
       mcpClients.delete(server.id);
     });
 
-    const MCP_REQUEST_TIMEOUT_MS = 30_000;
+    const MCP_REQUEST_TIMEOUT_MS = 120_000;
 
     const sendRequest = (method: string, params: any = {}): Promise<any> => {
       return new Promise((resolve, reject) => {
@@ -1388,7 +1388,7 @@ async function executeGoalRunnerTool(toolName: string, args: string, toolCallId?
           ? ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', finalCommand]
           : ['-c', finalCommand];
         const child = spawn(shellToUse, shellArgs, {
-          timeout: 120000,
+          timeout: 300000,
           windowsHide: true,
           env: { ...process.env, PYTHONIOENCODING: 'utf-8', LANG: 'zh_CN.UTF-8', LC_ALL: 'zh_CN.UTF-8' },
           cwd,
@@ -1457,7 +1457,7 @@ async function runGoalInMainProcess(payload: GoalRunExecutePayload): Promise<Goa
         messages = [{ role: 'user', content: prompt }];
       }
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 120_000);
+      const timeoutId = setTimeout(() => controller.abort(), 180_000);
       try {
         const response = await fetch(`${payload.apiSettings.baseURL}/chat/completions`, {
           method: 'POST',
@@ -1922,8 +1922,8 @@ ipcMain.handle('execute-tool', async (_event: any, toolName: string, args: strin
           const shellArgs = isWindows
             ? ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', finalCommand]
             : ['-c', finalCommand];
-          const child = spawn(shellToUse, shellArgs, { 
-            timeout: 120000,
+    const child = spawn(shellToUse, shellArgs, {
+          timeout: 300000,
             windowsHide: true,
             env,
             cwd,
@@ -2149,7 +2149,7 @@ ipcMain.handle('execute-tool', async (_event: any, toolName: string, args: strin
 ipcMain.handle('api-proxy', async (_event, requestData: ApiProxyRequest): Promise<{ status: number; body: string }> => {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60_000);
+    const timeoutId = setTimeout(() => controller.abort(), 120_000);
     try {
       const response = await fetch(requestData.url, {
         method: requestData.method,
@@ -2180,7 +2180,7 @@ ipcMain.handle('api-proxy-stream', async (event, requestData: ApiProxyStreamRequ
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 300_000);
+    const timeoutId = setTimeout(() => controller.abort(), 600_000);
     try {
       const response = await fetch(fetchData.url, {
         method: fetchData.method,
@@ -2274,7 +2274,7 @@ ipcMain.handle('execute-mcp-tool', async (_event, serverId: string, toolName: st
       }
     }
 
-    const MCP_REQUEST_TIMEOUT_MS = 30_000;
+    const MCP_REQUEST_TIMEOUT_MS = 120_000;
 
     const sendRequest = (method: string, params: any = {}): Promise<any> => {
       return new Promise((resolve, reject) => {
