@@ -4,6 +4,11 @@
  * Similar to Codex, Claude Code, and Antigravity 2.0's /goal command
  */
 
+import {
+  buildNoToolCallHint as buildNoToolCallRecoveryHint,
+  looksLikeCompletionResponse,
+} from './tool-call-recovery';
+
 export interface Goal {
   id: string;
   description: string;
@@ -184,9 +189,11 @@ function parseToolCalls(text: string): Array<{ name: string; arguments: string }
  */
 function buildRetryHint(error: string, attempt: number): string {
   const lower = error.toLowerCase();
-  const hints: string[] = [];
   const retryPrefix = `Retry ${attempt + 1}:`;
 
+  if (lower.includes('xml tool call') || lower.includes('no tool call') || lower.includes('missing tool call')) {
+    return `${retryPrefix} emit exactly one XML tool call (<read>, <write>, <edit>, or <bash>) and no prose until the task is truly complete.`;
+  }
   if (lower.includes('enoent') || lower.includes('no such file') || lower.includes('not found')) {
     return `${retryPrefix} confirm the path with read or a directory listing before modifying files.`;
   }
@@ -206,27 +213,6 @@ function buildRetryHint(error: string, attempt: number): string {
     return `${retryPrefix} analyze the command output and try a different PowerShell-safe command.`;
   }
   return `${retryPrefix} analyze the failure and continue with a different, safer approach.`;
-
-  if (lower.includes('enoent') || lower.includes('no such file') || lower.includes('not found')) {
-      hints.push('文件或路径不存在 — 先用 read 或 bash ls 确认正确的路径再操作');
-  } else if (lower.includes('permission') || lower.includes('access denied') || lower.includes('eacces')) {
-      hints.push('权限不足 — 检查文件权限，或尝试用管理员权限执行');
-  } else if (lower.includes('syntax') || lower.includes('unexpected token') || lower.includes('parse')) {
-      hints.push('语法错误 — 先读取文件了解结构，再进行编辑');
-  } else if (lower.includes('timeout') || lower.includes('timed out')) {
-      hints.push('命令超时 — 尝试更精确的命令或分步执行');
-  } else if (lower.includes('old_str not found') || lower.includes('old_str')) {
-      hints.push('编辑匹配失败 — 先用 read 查看文件内容，使用更短、更精确的 old_str');
-  } else if (lower.includes('command exited') || lower.includes('error:')) {
-      hints.push('Windows 环境请使用 PowerShell 语法，路径含空格或中文时加引号');
-  } else {
-      hints.push('分析错误原因，改用更小、更安全的步骤继续');
-  }
-
-  hints.push('分析失败原因，换一种更稳妥的方法继续');
-  hints.push(`第 ${attempt + 1} 次重试: 请不要重复之前失败的操作，换一种完全不同的方法。`);
-
-  return hints.join('\n');
 }
 
 async function generateReliableGoalPlan(
@@ -360,6 +346,8 @@ Rules:
   const actionsTaken: Array<{ tool: string; success: boolean; target: string; content?: string; oldStr?: string; newStr?: string }> = [];
   const recentSignatures: string[] = [];
   const maxSteps = 30;
+  const maxNoToolCallRetries = 2;
+  let noToolCallStreak = 0;
   let finalAssistantResponse = '';
 
   for (let step = 0; step < maxSteps; step++) {
@@ -373,9 +361,23 @@ Rules:
 
     const toolCalls = parseToolCalls(response);
     if (toolCalls.length === 0) {
-      onProgress?.(100);
-      return response || buildStructuredTaskReport(actionsTaken, goal, task, finalAssistantResponse);
+      if (looksLikeCompletionResponse(response)) {
+        onProgress?.(100);
+        return response || buildStructuredTaskReport(actionsTaken, goal, task, finalAssistantResponse);
+      }
+
+      noToolCallStreak += 1;
+      if (noToolCallStreak >= maxNoToolCallRetries) {
+        throw new Error(`No XML tool call emitted for task: ${task.description}`);
+      }
+
+      conversationHistory.push({
+        role: 'user',
+        content: buildNoToolCallRecoveryHint(`Current task: ${task.description}`, response, noToolCallStreak),
+      });
+      continue;
     }
+    noToolCallStreak = 0;
 
     for (const toolCall of toolCalls.slice(0, 1)) {
       let target = '';

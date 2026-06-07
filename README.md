@@ -6,11 +6,11 @@ Pi Agent Desktop 是一个面向通用用户的桌面客户端，基于开源 Pi
 
 ## Download / 下载
 
-Current release: `v1.0.5`
+Current release: `v1.0.7`
 
 - GitHub Releases: [Latest release](https://github.com/tzynb112/pi-agent-desktop/releases/latest)
-- Windows installer: [PianoAgent Desktop Setup 1.0.5.exe](https://github.com/tzynb112/pi-agent-desktop/releases/download/v1.0.5/PianoAgent.Desktop.Setup.1.0.5.exe)
-- Windows portable: [PianoAgent Desktop 1.0.5.exe](https://github.com/tzynb112/pi-agent-desktop/releases/download/v1.0.5/PianoAgent.Desktop.1.0.5.exe)
+- Windows installer: [PianoAgent Desktop Setup 1.0.7.exe](https://github.com/tzynb112/pi-agent-desktop/releases/download/v1.0.7/PianoAgent.Desktop.Setup.1.0.7.exe)
+- Windows portable: [PianoAgent Desktop 1.0.7.exe](https://github.com/tzynb112/pi-agent-desktop/releases/download/v1.0.7/PianoAgent.Desktop.1.0.7.exe)
 - Source build: `npm run start`
 
 ## Quick Start / 快速开始
@@ -57,4 +57,5 @@ Key entry points:
 - `node_modules/`, `dist/`, logs, and local tool directories are ignored from version control.
 - Local Codex workspace data lives under `.arts/` and `.codeartsdoer/` and is treated as environment state, not product code.
 - At the moment, the official release package is for Windows only.
+- Conversations and settings are stored in the local user profile, so reinstalling the app does not clear them automatically.
 
