@@ -1,6 +1,6 @@
 {
   "name": "electron-react-ide",
-  "version": "1.0.6",
+  "version": "1.0.11",
   "description": "VS Code style Electron + React + TypeScript IDE",
   "main": "dist/main/main.js",
   "scripts": {
