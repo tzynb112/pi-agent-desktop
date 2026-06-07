@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, IpcMainEvent } from 'electron';
+import { app, BrowserWindow, dialog, IpcMainEvent, ipcMain, nativeImage } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { exec, spawn, ChildProcess } from 'child_process';
@@ -45,6 +45,11 @@ import {
 } from './cache';
 
 const execAsync = promisify(exec);
+const APP_USER_MODEL_ID = 'com.tzynb112.pianoagentdesktop';
+
+if (process.platform === 'win32') {
+  app.setAppUserModelId(APP_USER_MODEL_ID);
+}
 
 // --- Fuzzy Edit Engine ---
 interface FuzzyEditResult {
@@ -1062,13 +1067,27 @@ function stopMcpServer(id: string): void {
 
 let mainWindow: BrowserWindow | null = null;
 
+function getWindowIconPath(): string {
+  const icoPath = path.join(__dirname, 'icon.ico');
+  const pngPath = path.join(__dirname, 'icon.png');
+
+  if (process.platform === 'win32') {
+    return fs.existsSync(icoPath) ? icoPath : pngPath;
+  }
+
+  return fs.existsSync(pngPath) ? pngPath : icoPath;
+}
+
 function createWindow(): void {
+  const windowIconPath = getWindowIconPath();
+  const windowIcon = nativeImage.createFromPath(windowIconPath);
+
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 800,
     minHeight: 600,
-    icon: path.join(__dirname, 'icon.png'),
+    icon: windowIcon.isEmpty() ? windowIconPath : windowIcon,
     frame: false,
     titleBarStyle: 'hiddenInset',
     backgroundColor: '#1e1e1e',
