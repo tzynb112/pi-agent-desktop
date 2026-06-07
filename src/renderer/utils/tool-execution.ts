@@ -142,7 +142,11 @@ export function truncateToolResult(result: string, maxLength = 8000): string {
  * Check if a tool result is an error.
  */
 export function isToolErrorResult(result?: string): boolean {
-  return !!result && (/^\s*Error:/i.test(result) || /工具失败|tool failed/i.test(result));
+  return !!result && (
+    /^\s*Error:/i.test(result) ||
+    /工具失败|tool failed/i.test(result) ||
+    /no search results found for:/i.test(result)
+  );
 }
 
 /**
@@ -164,6 +168,8 @@ export function buildToolRecoveryHint(toolCall: ToolCall, result: string): strin
     hint.push('Syntax error - read the file to understand its structure before editing.');
   } else if (lower.includes('timeout') || lower.includes('timed out')) {
     hint.push('Command timed out - try a more targeted command or break it into smaller steps.');
+  } else if (toolCall.name === 'search' && lower.includes('no search results found for:')) {
+    hint.push('Search returned no relevant pages - broaden the query, remove quotes, or try a different search term. Do not repeat the same search with tiny variations.');
   } else if (toolCall.name === 'bash') {
     hint.push('On Windows, prefer PowerShell syntax. Quote paths with spaces or non-ASCII characters. Use Get-ChildItem/Get-Content/Select-String/Get-Location.');
   } else {
