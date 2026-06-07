@@ -1,6 +1,6 @@
 {
   "name": "electron-react-ide",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "VS Code style Electron + React + TypeScript IDE",
   "main": "dist/main/main.js",
   "scripts": {
@@ -11,6 +11,7 @@
     "clean:dist": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "prebuild": "npm run clean:dist",
     "build": "webpack --config webpack.renderer.config.js --mode production && tsc -p tsconfig.main.json",
+    "package:win": "npm run build && electron-builder --win nsis portable",
     "typecheck": "tsc --noEmit",
     "test": "python verify_all.py"
   },
@@ -26,6 +27,24 @@
   "sideEffects": [
     "*.css"
   ],
+  "build": {
+    "appId": "com.tzynb112.pianoagentdesktop",
+    "productName": "PianoAgent Desktop",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    }
+  },
   "dependencies": {
     "clsx": "^2.1.1",
     "lucide-react": "^1.16.0",
@@ -48,6 +67,7 @@
     "cross-env": "^7.0.3",
     "css-loader": "^6.8.0",
     "electron": "^28.0.0",
+    "electron-builder": "^26.15.0",
     "html-webpack-plugin": "^5.5.0",
     "postcss": "^8.5.15",
     "postcss-loader": "^8.2.1",

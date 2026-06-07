@@ -28,10 +28,13 @@ export async function buildRequestBody(options: BuildRequestOptions): Promise<Bu
   const { apiSettings, trimmedMessages, mcpTools, convId, analysisCallLLM } = options;
 
   // 1. Filter enabled built-in tools
-  const enabledToolsConf = apiSettings.enabledTools || { read: true, bash: true, edit: true, write: true };
+  const enabledToolsConf = { read: true, bash: true, edit: true, write: true, ...(apiSettings.enabledTools || {}) };
   const activeTools = TOOLS_DEFINITION.filter((t) => {
-    const name = t.function.name as 'read' | 'bash' | 'edit' | 'write';
-    return !!enabledToolsConf[name];
+    const name = t.function.name;
+    if (Object.prototype.hasOwnProperty.call(enabledToolsConf, name)) {
+      return !!(enabledToolsConf as Record<string, boolean>)[name];
+    }
+    return true;
   });
 
   // 2. Append MCP tools

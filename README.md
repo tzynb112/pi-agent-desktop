@@ -2,6 +2,11 @@
 
 Electron + React + TypeScript desktop app for chat-driven coding, file operations, tool execution, and goal queue workflows.
 
+## Download
+
+- Latest Windows release: [GitHub Releases](https://github.com/tzynb112/pi-agent-desktop/releases/latest)
+- Source build: `npm run start`
+
 ## Quick Start
 
 1. Double-click `start.bat`.
@@ -45,3 +50,24 @@ Key entry points:
 - `src/renderer/index.html` is the renderer template used by webpack.
 - `node_modules/`, `dist/`, logs, and local tool directories are ignored from version control.
 - Local Codex workspace data lives under `.arts/` and `.codeartsdoer/` and is treated as environment state, not product code.
+
+## 中文说明
+
+PianoAgent 是一个基于 Electron + React + TypeScript 的桌面端 AI 编程助手，支持：
+
+- 对话式编程
+- 文件读写与 shell 工具调用
+- 自定义工具与 MCP 工具
+- 目标队列与自动恢复
+
+### 下载
+
+- 最新 Windows 安装包： [GitHub Releases](https://github.com/tzynb112/pi-agent-desktop/releases/latest)
+- 源码运行：`npm run start`
+
+### 本地构建
+
+```bash
+npm run build
+npm run package:win
+```

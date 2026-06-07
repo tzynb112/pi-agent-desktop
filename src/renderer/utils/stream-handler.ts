@@ -38,6 +38,7 @@ export async function streamOnce(params: StreamOnceParams): Promise<StreamedChat
   const streamId = 'stream_' + Date.now() + '_' + Math.random().toString(36).slice(2);
   let sseBuffer = '';
   let fullResponse = '';
+  let fullReasoning = '';
   let responseStatus = 0;
   let settled = false;
   const streamedToolCalls = new Map<number, ToolCallPart>();
@@ -70,7 +71,7 @@ export async function streamOnce(params: StreamOnceParams): Promise<StreamedChat
 
     onUpdate({
       content: sanitizeAssistantDisplayContent(fullResponse),
-      reasoningContent: undefined,
+      reasoningContent: fullReasoning ? sanitizeAssistantDisplayContent(fullReasoning) : undefined,
       toolCalls: visibleToolCalls.length > 0 ? visibleToolCalls : undefined,
       isStreaming: true,
     });
@@ -113,7 +114,7 @@ export async function streamOnce(params: StreamOnceParams): Promise<StreamedChat
               cleanupRaf();
               resolve({
                 content: fullResponse,
-                reasoningContent: '',
+                reasoningContent: fullReasoning,
                 toolCalls: Array.from(streamedToolCalls.values())
                   .filter((tc) => tc.name)
                   .map((tc) => ({
@@ -130,10 +131,16 @@ export async function streamOnce(params: StreamOnceParams): Promise<StreamedChat
               const choice = parsed.choices?.[0];
               const delta = choice?.delta || {};
               const contentDelta = delta.content || '';
+              const reasoningDelta = delta.reasoning_content || delta.reasoning || '';
               let changed = false;
 
               if (contentDelta) {
                 fullResponse += contentDelta;
+                changed = true;
+              }
+
+              if (reasoningDelta) {
+                fullReasoning += reasoningDelta;
                 changed = true;
               }
 
@@ -151,6 +158,18 @@ export async function streamOnce(params: StreamOnceParams): Promise<StreamedChat
                   streamedToolCalls.set(idx, existing);
                   changed = true;
                 }
+              }
+
+              if (delta.function_call) {
+                const existing = streamedToolCalls.get(0) || {
+                  id: 'tool_' + Date.now() + '_0',
+                  name: '',
+                  arguments: '',
+                };
+                if (delta.function_call.name) existing.name += delta.function_call.name;
+                if (delta.function_call.arguments) existing.arguments += delta.function_call.arguments;
+                streamedToolCalls.set(0, existing);
+                changed = true;
               }
 
               if (changed) {
@@ -216,7 +235,7 @@ export async function streamOnce(params: StreamOnceParams): Promise<StreamedChat
         cleanupRaf();
         resolve({
           content: fullResponse,
-          reasoningContent: '',
+          reasoningContent: fullReasoning,
           toolCalls: Array.from(streamedToolCalls.values())
             .filter((tc) => tc.name)
             .map((tc) => ({
