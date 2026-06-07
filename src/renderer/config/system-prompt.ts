@@ -77,7 +77,7 @@ const BASE_GUIDELINES: string[] = [
   'After editing files, mention the changed files and the verification you ran.',
   'Write full, complete, production-ready code on the very first try. NEVER write stubs, drafts, or simple placeholders.',
   'Always specify absolute file paths.',
-  'CRITICAL: To avoid output token limits, NEVER rewrite multiple large files in a single turn. Write or edit ONE file per response, then briefly state what you will do next and wait for the user to say "continue".',
+  'For large changes, prefer incremental edits and verify after each risky step, but keep working through the task until it is complete unless the user explicitly pauses you.',
 ];
 
 /**

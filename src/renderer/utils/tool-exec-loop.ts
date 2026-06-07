@@ -7,9 +7,9 @@ import type { ToolCall } from "../types";
 import { truncateToolResult, isToolErrorResult, buildToolRecoveryHint } from "./tool-execution";
 
 /** Default circuit breaker thresholds */
-export const CIRCUIT_BREAKER_FAILURE_LIMIT = 5;
-export const CIRCUIT_BREAKER_LOOP_LIMIT = 8;
-export const DUPLICATE_CALL_LIMIT = 2;
+export const CIRCUIT_BREAKER_FAILURE_LIMIT = 10;
+export const CIRCUIT_BREAKER_LOOP_LIMIT = 25;
+export const DUPLICATE_CALL_LIMIT = 5;
 
 export interface ToolExecState {
   recentToolCalls: Array<{ name: string; args: string }>;
@@ -38,69 +38,56 @@ export function processToolResult(
   let finalResult = truncateToolResult(buildToolRecoveryHint(tc, rawResult));
   let shouldBreak = false;
 
-  // Track consecutive failures
   if (isToolErrorResult(rawResult)) {
     state.consecutiveFailures++;
   } else {
     state.consecutiveFailures = 0;
   }
 
-  // Circuit breaker: consecutive failures inject stop prompt
-  // Note: do NOT reset consecutiveFailures here; only reset on success (above).
-  // This ensures the circuit breaker keeps firing if the LLM ignores the stop prompt.
   if (state.consecutiveFailures >= CIRCUIT_BREAKER_FAILURE_LIMIT) {
-    finalResult += "\n\n[CIRCUIT BREAKER] STOP! You have failed " + state.consecutiveFailures +
-      " times in a row. Do NOT retry the same operation. Instead: 1) Analyze what went wrong, " +
-      "2) Try a completely different approach, 3) If you cannot proceed, summarize what you have accomplished so far and stop.";
+    finalResult += "\n\n[Recovery Hint] You have failed " + state.consecutiveFailures +
+      " times in a row. Stop repeating the same command and switch strategy, but keep moving toward the task.";
   }
 
-  // Loop detection: track recent tool calls
-  const tcSig = tc.name + ":" + (tc.arguments || "").substring(0, 100);
+  const tcSig = tc.name + ":" + (tc.arguments || "").substring(0, 300);
   state.recentToolCalls.push({ name: tc.name, args: tcSig });
-  if (state.recentToolCalls.length > 20) state.recentToolCalls.shift();
-  const recentSameType = state.recentToolCalls.filter(t => t.name === tc.name).length;
+  if (state.recentToolCalls.length > 50) state.recentToolCalls.shift();
+  const recentSameType = state.recentToolCalls.filter((t) => t.name === tc.name).length;
 
-  // Duplicate call detection: same tool + same args
-  const recentSameSig = state.recentToolCalls.filter(t => t.args === tcSig).length;
+  const recentSameSig = state.recentToolCalls.filter((t) => t.args === tcSig).length;
   if (recentSameSig > DUPLICATE_CALL_LIMIT && !isToolErrorResult(rawResult)) {
-    finalResult += "\n\n[Duplicate Detection] You have called '" + tc.name + "' with the SAME arguments " +
-      recentSameSig + " times and it SUCCEEDED each time. This is a duplicate loop. " +
-      "The operation is already done — do NOT call this tool again with the same arguments. " +
-      "Tell the user the result and stop retrying.";
-    shouldBreak = true;
+    finalResult += "\n\n[Duplicate Detection] You have called '" + tc.name + "' with the same arguments " +
+      recentSameSig + " times and it succeeded. Continue from the latest result and choose a different next step.";
   }
 
-  // GUI file-open duplicate detection: if multiple bash calls try to open the same file
-  // (even with different methods like Start-Process, msedge.exe, cmd /c start, etc.)
-  if (tc.name === 'bash' && !shouldBreak) {
+  if (tc.name === 'bash') {
     const fileOpenMatch = tc.arguments?.match(/["']?([A-Za-z]:\\[^\s"']+?\.(?:html?|htm|pdf|png|jpg|jpeg|svg|mp4|mp3|wav|txt|md|docx?|xlsx?|pptx?))["']?/i);
     if (fileOpenMatch) {
       const targetFile = fileOpenMatch[1].toLowerCase().replace(/\\/g, '/');
-      const sameFileOpens = state.recentToolCalls.filter(t => {
+      const sameFileOpens = state.recentToolCalls.filter((t) => {
         const m = t.args.match(/["']?([A-Za-z]:\\[^\s"']+?\.(?:html?|htm|pdf|png|jpg|jpeg|svg|mp4|mp3|wav|txt|md|docx?|xlsx?|pptx?))["']?/i);
         return m && m[1].toLowerCase().replace(/\\/g, '/') === targetFile;
       }).length;
       if (sameFileOpens > DUPLICATE_CALL_LIMIT && !isToolErrorResult(rawResult)) {
         finalResult += "\n\n[Duplicate File Open] You have tried to open '" + targetFile + "' " +
           sameFileOpens + " times using different methods. It has already been opened successfully. " +
-          "Do NOT try to open this file again by any method. Tell the user the file is open and stop.";
-        shouldBreak = true;
+          "Continue from the opened file instead of trying to open it again.";
       }
     }
   }
 
-  // Circuit breaker: too many same-type calls
   const isBulkTool = tc.name === 'write' || tc.name === 'read' || tc.name === 'bash' || tc.name === 'edit';
-  const loopLimit = isBulkTool ? 15 : CIRCUIT_BREAKER_LOOP_LIMIT;
-  
+  const loopLimit = isBulkTool ? 45 : CIRCUIT_BREAKER_LOOP_LIMIT;
+  const warningLimit = isBulkTool ? 20 : 10;
+
   if (recentSameType >= loopLimit) {
-    finalResult += "\n\n[CIRCUIT BREAKER] EMERGENCY STOP! You have called " + "'" + tc.name + "'" +
-      " " + recentSameType + " times recently. This is a loop. You MUST stop calling tools immediately and return a summary of what you have done so far.";
+    finalResult += "\n\n[Loop Detection] You have called '" + tc.name + "' " + recentSameType +
+      " times recently. Switch strategy and avoid repeating the same tool.";
     shouldBreak = true;
     state.recentToolCalls.length = 0;
-  } else if (recentSameType >= (isBulkTool ? 10 : 3) && !isToolErrorResult(rawResult)) {
-    finalResult += "\n\n[Loop Detection] You have called " + "'" + tc.name + "'" +
-      " " + recentSameType + " times recently. If you are stuck, try a completely different approach or ask the user for clarification.";
+  } else if (recentSameType >= warningLimit && !isToolErrorResult(rawResult)) {
+    finalResult += "\n\n[Loop Detection] You have called '" + tc.name + "' " + recentSameType +
+      " times recently. If you are stuck, try a different approach or continue from the latest result.";
   }
 
   return { result: finalResult, shouldBreak };

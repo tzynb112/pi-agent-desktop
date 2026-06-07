@@ -22,7 +22,8 @@ checks = {
         ("没有可用的代理", "Chinese strings fixed"),
         ("generateReliableGoalPlan", "Long workflow: reliable goal planning prompt"),
         ("executeReliableSubTask", "Long workflow: reliable subtask execution prompt"),
-        ("const maxSteps = 30", "Long workflow: larger per-subtask step budget"),
+        ("const maxSteps = 80;", "Bugfix: larger goal step budget"),
+        ("Continue from the latest result and choose a different next step", "Bugfix: duplicate tool calls now prompt retry instead of aborting"),
     ],
     r"D:\UI交互开发\src\renderer\utils\goal-executor.ts": [
         ("export * from '../../shared/goal-executor'", "Long workflow: renderer goal executor re-exports shared implementation"),
@@ -37,12 +38,13 @@ checks = {
     ],
     r"D:\UI交互开发\src\renderer\App.tsx": [
         ("executeGoalRun", "Long workflow: renderer delegates goal execution to main"),
+        ("const MAX_STEPS = content?.startsWith('/goal') ? 240 : 120;", "Bugfix: larger conversation step budget"),
     ],
     r"D:\UI交互开发\src\renderer\utils\tool-exec-loop.ts": [
-        ("do NOT reset consecutiveFailures here", "Bug #4: circuit breaker"),
-        ("export const CIRCUIT_BREAKER_FAILURE_LIMIT = 5", "Bugfix: higher failure tolerance"),
-        ("export const CIRCUIT_BREAKER_LOOP_LIMIT = 8", "Bugfix: higher loop tolerance"),
-        ("export const DUPLICATE_CALL_LIMIT = 2", "Bugfix: higher duplicate tolerance"),
+        ("export const CIRCUIT_BREAKER_FAILURE_LIMIT = 10;", "Bugfix: higher failure tolerance"),
+        ("export const CIRCUIT_BREAKER_LOOP_LIMIT = 25;", "Bugfix: higher loop tolerance"),
+        ("export const DUPLICATE_CALL_LIMIT = 5;", "Bugfix: higher duplicate tolerance"),
+        ("Continue from the latest result and choose a different next step.", "Bugfix: duplicate loop is now a warning"),
     ],
     r"D:\UI交互开发\src\renderer\utils\tool-execution.ts": [
         ("工具失败", "Bug #6: Chinese error pattern"),
@@ -55,12 +57,12 @@ checks = {
         ("trustModeConfirmed: true", "Bugfix: trust mode stays enabled after opt-in"),
         ("autoCompactionThreshold: 20000", "Bugfix: less aggressive auto-compaction"),
     ],
+    r"D:\UI交互开发\src\renderer\config\system-prompt.ts": [
+        ("keep working through the task until it is complete unless the user explicitly pauses you", "Bugfix: no forced single-file turn stop"),
+    ],
     r"D:\UI交互开发\src\renderer\utils\stream-handler.ts": [
         ("const CHUNK_TIMEOUT_MS = 60_000;", "Bugfix: longer stream chunk timeout"),
         ("const TOTAL_TIMEOUT_MS = 600_000;", "Bugfix: longer stream total timeout"),
-    ],
-    r"D:\UI交互开发\src\shared\goal-executor.ts": [
-        ("const maxSteps = 50;", "Bugfix: larger goal step budget"),
     ],
     r"D:\UI交互开发\src\main\main.ts": [
         ("setTimeout(() => controller.abort(), 180_000)", "Bugfix: longer API timeout"),

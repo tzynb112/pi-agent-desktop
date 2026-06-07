@@ -338,7 +338,7 @@ Rules:
   ];
   const actionsTaken: Array<{ tool: string; success: boolean; target: string; content?: string; oldStr?: string; newStr?: string }> = [];
   const recentSignatures: string[] = [];
-  const maxSteps = 50;
+  const maxSteps = 80;
   let finalAssistantResponse = '';
 
   for (let step = 0; step < maxSteps; step++) {
@@ -368,10 +368,13 @@ Rules:
 
       const signature = `${toolCall.name}:${toolCall.arguments}`;
       recentSignatures.push(signature);
-      if (recentSignatures.length > 8) recentSignatures.shift();
+      if (recentSignatures.length > 12) recentSignatures.shift();
       const duplicateCount = recentSignatures.filter((item) => item === signature).length;
-      if (duplicateCount >= 3) {
-        throw new Error(`Repeated identical tool call detected for ${toolCall.name}. Last target: ${target}`);
+      if (duplicateCount >= 5) {
+        const retryHint = `Repeated identical tool call detected for ${toolCall.name}. Continue from the latest result and choose a different next step instead of repeating ${target || 'the same target'}.`;
+        conversationHistory.push({ role: 'user', content: retryHint });
+        onProgress?.(Math.min(95, Math.round(((step + 1) / maxSteps) * 100)));
+        continue;
       }
 
       onToolCall?.(toolCall.name, target);
@@ -390,7 +393,7 @@ Rules:
 
       const feedback = success
         ? `Tool ${toolCall.name} result:\n${toolResult}`
-        : `Tool ${toolCall.name} failed:\n${toolResult}\n\nRecover by changing strategy. Do not repeat the same call.`;
+        : `Tool ${toolCall.name} failed:\n${toolResult}\n\nRecover by changing strategy. Do not repeat the same call. Continue from the latest result and choose a different next step.`;
       conversationHistory.push({ role: 'user', content: feedback });
       onProgress?.(Math.min(95, Math.round(((step + 1) / maxSteps) * 100)));
     }

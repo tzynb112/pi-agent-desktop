@@ -2150,7 +2150,7 @@ return false; // Not handled
           }
         }
 
-        const MAX_STEPS = content?.startsWith('/goal') ? 120 : 60;
+        const MAX_STEPS = content?.startsWith('/goal') ? 240 : 120;
         let step = 0;
         const toolExecState = createToolExecState();
         const activeConvForToolGate = currentConvs.find((c: Conversation) => c.id === convId) || null;
@@ -2453,7 +2453,7 @@ return false; // Not handled
           const limitMsg: ChatMessage = {
             id: `msg_step_limit_${Date.now()}`,
             role: 'assistant',
-            content: `⚠️ 已达到单轮最大执行步数 (${MAX_STEPS} 步)。如需继续，请发送"继续任务"。`,
+            content: `⚠️ 已达到本轮执行上限 (${MAX_STEPS} 步)。我会保留当前状态并停止本轮循环，后续可以从这里继续推进。`,
             timestamp: Date.now(),
           };
           currentConvs = currentConvs.map((c: Conversation) => {
