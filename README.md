@@ -6,21 +6,17 @@ Pi Agent Desktop 是一个面向通用用户的桌面客户端，基于开源 Pi
 
 ## Download / 下载
 
-Current release: `v1.0.10`
+Current release: `v1.0.11`
 
 - GitHub Releases: [Latest release](https://github.com/tzynb112/pi-agent-desktop/releases/latest)
-- Windows installer: [PianoAgent Desktop Setup 1.0.10.exe](https://github.com/tzynb112/pi-agent-desktop/releases/download/v1.0.10/PianoAgent.Desktop.Setup.1.0.10.exe)
-- Windows portable: [PianoAgent Desktop 1.0.10.exe](https://github.com/tzynb112/pi-agent-desktop/releases/download/v1.0.10/PianoAgent.Desktop.1.0.10.exe)
+- Windows installer: [PianoAgent Desktop Setup 1.0.11.exe](https://github.com/tzynb112/pi-agent-desktop/releases/download/v1.0.11/PianoAgent.Desktop.Setup.1.0.11.exe)
+- Windows portable: [PianoAgent Desktop 1.0.11.exe](https://github.com/tzynb112/pi-agent-desktop/releases/download/v1.0.11/PianoAgent.Desktop.1.0.11.exe)
 - Source build: `npm run start`
 
 ## Quick Start / 快速开始
 
 1. Double-click `start.bat`.
 2. Or run:
-
-```bash
-npm run start
-```
 
 The app starts the renderer on `http://localhost:9000` and opens the Electron window once the main process is ready.
 
