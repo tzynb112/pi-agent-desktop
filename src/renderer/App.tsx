@@ -2180,7 +2180,7 @@ return false; // Not handled
         }
 
         const MAX_STEPS = 30;
-        const MAX_NO_TOOL_CALL_RETRIES = 2;
+          const MAX_NO_TOOL_CALL_RETRIES = 4;
         let step = 0;
         let noToolCallStreak = 0;
         const toolExecState = createToolExecState();

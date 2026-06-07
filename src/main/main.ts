@@ -1041,7 +1041,7 @@ async function startMcpServer(server: McpServerConfig): Promise<void> {
     const initResult = await sendRequest('initialize', {
       protocolVersion: '2024-11-05',
       capabilities: {},
-      clientInfo: { name: 'PianoAgent', version: '1.0.9' }
+      clientInfo: { name: 'PianoAgent', version: '1.0.10' }
     });
     
     const initializedNotification = {

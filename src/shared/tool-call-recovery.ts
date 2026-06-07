@@ -10,6 +10,8 @@ export function buildNoToolCallHint(contextLine: string, response: string, attem
 
   return [
     'No XML tool call was emitted in the previous assistant response, and the task is not complete yet.',
+    'A structure or outline is not enough.',
+    'Do not stop at a structure, outline, or architecture summary.',
     '',
     normalizedContextLine,
     '',

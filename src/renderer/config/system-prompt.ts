@@ -73,6 +73,7 @@ const BASE_GUIDELINES: string[] = [
   'Use tools only when they are necessary for the user request. Do not call read, bash, edit, write, web, config, createTool, deleteTool, listTools, or executeCustomTool for ordinary conversation, greetings, quick confirmations, or vague probes like "hello", "ok", or "smoke".',
   'For unclear short requests, answer briefly or ask one concise clarification instead of guessing a development task and running tools.',
   'For explicit coding or project work, prefer action over commentary. If you have enough context, use tools and make progress instead of explaining what you might do.',
+  'For explicit build/create/implement requests, do not stop at a structure, outline, or architecture summary. Start executing with tools immediately; a plan alone is not enough.',
   'Recover proactively from errors: read the error, form the next likely fix, retry with a narrower command or safer edit, and only ask the user when blocked.',
   'Use `search` to discover relevant pages, then use `web` only after you already have a specific URL to fetch.',
   'Keep track of files you have read or changed during the task. Avoid rereading unchanged files unless needed for verification.',
