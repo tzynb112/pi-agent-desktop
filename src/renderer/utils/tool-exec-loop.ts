@@ -5,6 +5,10 @@
 
 import type { ToolCall } from "../types";
 import { truncateToolResult, isToolErrorResult, buildToolRecoveryHint } from "./tool-execution";
+import {
+  extractGuiLaunchTarget,
+  normalizeGuiLaunchTarget,
+} from "../../shared/gui-launch-detection";
 
 /** Default circuit breaker thresholds */
 export const CIRCUIT_BREAKER_FAILURE_LIMIT = 3;
@@ -73,12 +77,12 @@ export function processToolResult(
   // GUI file-open duplicate detection: if multiple bash calls try to open the same file
   // (even with different methods like Start-Process, msedge.exe, cmd /c start, etc.)
   if (tc.name === 'bash' && !shouldBreak) {
-    const fileOpenMatch = tc.arguments?.match(/["']?([A-Za-z]:\\[^\s"']+?\.(?:html?|htm|pdf|png|jpg|jpeg|svg|mp4|mp3|wav|txt|md|docx?|xlsx?|pptx?))["']?/i);
-    if (fileOpenMatch) {
-      const targetFile = fileOpenMatch[1].toLowerCase().replace(/\\/g, '/');
+    const target = extractGuiLaunchTarget(tc.arguments || '');
+    if (target) {
+      const targetFile = normalizeGuiLaunchTarget(target);
       const sameFileOpens = state.recentToolCalls.filter(t => {
-        const m = t.args.match(/["']?([A-Za-z]:\\[^\s"']+?\.(?:html?|htm|pdf|png|jpg|jpeg|svg|mp4|mp3|wav|txt|md|docx?|xlsx?|pptx?))["']?/i);
-        return m && m[1].toLowerCase().replace(/\\/g, '/') === targetFile;
+        const m = extractGuiLaunchTarget(t.args || '');
+        return m && normalizeGuiLaunchTarget(m) === targetFile;
       }).length;
       if (sameFileOpens > DUPLICATE_CALL_LIMIT && !isToolErrorResult(rawResult)) {
         finalResult += "\n\n[Duplicate File Open] You have tried to open '" + targetFile + "' " +

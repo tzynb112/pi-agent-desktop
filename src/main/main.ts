@@ -37,6 +37,17 @@ import {
 } from './state-store';
 import { GoalExecutor } from '../shared/goal-executor';
 import {
+  buildDuplicateGuiLaunchMessage,
+  buildGuiLaunchSuccessMessage,
+  createGuiLaunchTracker,
+  markGuiLaunchFailed,
+  markGuiLaunchSucceeded,
+  reserveGuiLaunchTarget,
+  isGuiLaunchCommand,
+  type GuiLaunchReservation,
+  type GuiLaunchTracker,
+} from '../shared/gui-launch-detection';
+import {
   defaultCache,
   apiCache,
   appStateCache,
@@ -1329,8 +1340,10 @@ ipcMain.handle('goal-queue-fail', async (_event: any, goalId: string, note?: str
   }
 });
 
-async function executeGoalRunnerTool(toolName: string, args: string, toolCallId?: string): Promise<string> {
+async function executeGoalRunnerTool(toolName: string, args: string, toolCallId?: string, guiLaunchTracker?: GuiLaunchTracker): Promise<string> {
   let parsedArgs: any = {};
+  let guiLaunchReservation: GuiLaunchReservation | null = null;
+  let guiLaunchSucceeded = false;
   try {
     parsedArgs = JSON.parse(args || '{}');
   } catch (err: any) {
@@ -1370,6 +1383,10 @@ async function executeGoalRunnerTool(toolName: string, args: string, toolCallId?
         const command = parsedArgs.command;
         const cwd = typeof parsedArgs.cwd === 'string' && parsedArgs.cwd.trim() ? parsedArgs.cwd.trim() : undefined;
         if (!command) return 'Error: Missing command argument';
+        guiLaunchReservation = guiLaunchTracker ? reserveGuiLaunchTarget(guiLaunchTracker, command) : null;
+        if (guiLaunchReservation?.isDuplicate) {
+          return buildDuplicateGuiLaunchMessage(guiLaunchReservation.target);
+        }
         const isWindows = process.platform === 'win32';
         const shellToUse = isWindows ? 'powershell.exe' : '/bin/bash';
         const finalCommand = isWindows
@@ -1414,13 +1431,21 @@ async function executeGoalRunnerTool(toolName: string, args: string, toolCallId?
         if (exitResult.signal === 'SIGTERM' || exitResult.signal === 'SIGKILL' || child.killed) return 'Error: Command timed out after 120s';
         if (exitResult.code === -1 && spawnErrorMessage) return `Error: ${enrichWindowsErrorMsg(spawnErrorMessage, command)}`;
         if (exitResult.code !== 0) return `Error: Command exited with code ${exitResult.code}\n${enrichWindowsErrorMsg(output, command)}`;
-        return output;
+        if (guiLaunchReservation) {
+          markGuiLaunchSucceeded(guiLaunchTracker!, guiLaunchReservation.normalizedTarget);
+          guiLaunchSucceeded = true;
+        }
+        return isGuiLaunchCommand(command) ? buildGuiLaunchSuccessMessage(output) : output;
       }
       default:
         return `Error: Unknown goal tool: ${toolName}`;
     }
   } catch (err: any) {
     return `Error: ${err.message || 'Tool execution failed'}`;
+  } finally {
+    if (guiLaunchTracker && guiLaunchReservation?.wasReserved && !guiLaunchSucceeded) {
+      markGuiLaunchFailed(guiLaunchTracker, guiLaunchReservation.normalizedTarget);
+    }
   }
 }
 
@@ -1428,6 +1453,7 @@ async function runGoalInMainProcess(payload: GoalRunExecutePayload): Promise<Goa
   const run = startGoalRunState(payload);
   let latestGoalSnapshot: any = payload.existingGoal || payload.goalSnapshot || null;
   let latestAgents: any[] = payload.agentsSnapshot || [];
+  const guiLaunchTracker = createGuiLaunchTracker();
   const heartbeat = setInterval(() => {
     void heartbeatGoalRunState(run.id, {
       goalId: latestGoalSnapshot?.id || run.goalId,
@@ -1475,7 +1501,7 @@ async function runGoalInMainProcess(payload: GoalRunExecutePayload): Promise<Goa
 
     const goalExecutor = new GoalExecutor(
       callLLM,
-      (toolName, args) => executeGoalRunnerTool(toolName, args, `main_goal_tool_${Date.now()}`),
+      (toolName, args) => executeGoalRunnerTool(toolName, args, `main_goal_tool_${Date.now()}`, guiLaunchTracker),
       payload.maxConcurrentAgents || 1
     );
     goalExecutor.onEvent((event) => {
@@ -1996,13 +2022,8 @@ ipcMain.handle('execute-tool', async (_event: any, toolName: string, args: strin
           // For GUI-launching commands (Start-Process, Invoke-Item, start, xdg-open, open)
           // that produce no stdout or minimal output, provide a clear success message
           // so the LLM doesn't misinterpret the result as failure and retry.
-          const guiLaunchPatterns = /Start-Process|Invoke-Item|\bstart\s|xdg-open|\bopen\s|cmd\s*\/c\s*start/i;
-          const isGuiLaunch = guiLaunchPatterns.test(command);
-          if (isGuiLaunch && exitResult.code === 0) {
-            const guiMessage = combinedOutput === '(no output)'
-              ? 'Command executed successfully. The GUI process (browser or application) has been launched and should be visible on the user\'s desktop. No console output is expected for GUI commands.'
-              : `Command executed successfully. Output: ${combinedOutput}. The GUI process is running and visible on the user's desktop.`;
-            return { success: true, result: `${guiMessage} IMPORTANT: This command SUCCEEDED. The file/application IS open. Do NOT say it might not have opened. Do NOT suggest the user open it manually. Do NOT retry this command.` };
+          if (isGuiLaunchCommand(command) && exitResult.code === 0) {
+            return { success: true, result: buildGuiLaunchSuccessMessage(combinedOutput) };
           }
 
           return { success: true, result: combinedOutput };

@@ -14,7 +14,7 @@
     "build": "webpack --config webpack.renderer.config.js --mode production && tsc -p tsconfig.main.json && npm run copy:main-assets",
     "package:win": "npm run build && electron-builder --win nsis portable --publish never",
     "typecheck": "tsc --noEmit",
-    "test": "python verify_all.py"
+    "test": "python verify_all.py && node scripts/run-gui-launch-test.cjs"
   },
   "keywords": [
     "electron",

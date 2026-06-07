@@ -16,6 +16,10 @@ checks = {
         ("Command cancelled by user", "Long workflow: cancelled command result"),
         ("runGoalInMainProcess", "Long workflow: main-process goal runner"),
         ("goal-run-execute", "Long workflow: main-process goal execution IPC"),
+        ("buildGuiLaunchSuccessMessage", "GUI launch success messaging shared helper"),
+        ("reserveGuiLaunchTarget", "GUI launch duplicate guard shared helper"),
+        ("markGuiLaunchSucceeded", "GUI launch tracker success cleanup"),
+        ("markGuiLaunchFailed", "GUI launch tracker failure cleanup"),
     ],
     r"D:\UI交互开发\src\shared\goal-executor.ts": [
         ("function isToolErrorResult", "Bug #2+#6: shared isToolError"),
@@ -23,6 +27,11 @@ checks = {
         ("generateReliableGoalPlan", "Long workflow: reliable goal planning prompt"),
         ("executeReliableSubTask", "Long workflow: reliable subtask execution prompt"),
         ("const maxSteps = 30", "Long workflow: larger per-subtask step budget"),
+    ],
+    r"D:\UI交互开发\src\shared\gui-launch-detection.ts": [
+        ("createGuiLaunchTracker", "GUI launch tracker state"),
+        ("reserveGuiLaunchTarget", "GUI launch reservation guard"),
+        ("buildDuplicateGuiLaunchMessage", "GUI launch duplicate response"),
     ],
     r"D:\UI交互开发\src\renderer\utils\goal-executor.ts": [
         ("export * from '../../shared/goal-executor'", "Long workflow: renderer goal executor re-exports shared implementation"),
@@ -40,6 +49,7 @@ checks = {
     ],
     r"D:\UI交互开发\src\renderer\utils\tool-exec-loop.ts": [
         ("do NOT reset consecutiveFailures here", "Bug #4: circuit breaker"),
+        ("extractGuiLaunchTarget", "GUI launch target extraction shared helper"),
     ],
     r"D:\UI交互开发\src\renderer\utils\tool-execution.ts": [
         ("工具失败", "Bug #6: Chinese error pattern"),
