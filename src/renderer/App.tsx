@@ -38,6 +38,7 @@ import { runCompaction } from './utils/compaction-runner';
 import { buildReviewPrompt } from './utils/review-builder';
 import { tryParseJson } from './utils/json-heal';
 import { findDangerousCommandMatch } from './utils/bash-safety';
+import { buildNoToolCallHint, looksLikeCompletionResponse } from '../shared/tool-call-recovery';
 import type { Goal, Agent } from '../shared/goal-executor';
 import {
   GOAL_RUNNING_LEASE_MS,
@@ -2179,7 +2180,9 @@ return false; // Not handled
         }
 
         const MAX_STEPS = 30;
+        const MAX_NO_TOOL_CALL_RETRIES = 2;
         let step = 0;
+        let noToolCallStreak = 0;
         const toolExecState = createToolExecState();
         const activeConvForToolGate = currentConvs.find((c: Conversation) => c.id === convId) || null;
         const latestUserContentForToolGate = [...getActiveBranchMessages(activeConvForToolGate)]
@@ -2379,8 +2382,45 @@ return false; // Not handled
 
           // Break loop if no more tool calls
           if (toolCalls.length === 0) {
-            break;
+            if (looksLikeCompletionResponse(fullResponse)) {
+              break;
+            }
+
+            noToolCallStreak += 1;
+            if (noToolCallStreak >= MAX_NO_TOOL_CALL_RETRIES) {
+              break;
+            }
+
+            const followUpMessage: ChatMessage = {
+              id: `tool_hint_${Date.now()}_${step}`,
+              role: 'user',
+              content: buildNoToolCallHint(
+                `Current request: ${content || latestUserContentForToolGate}`,
+                fullResponse,
+                noToolCallStreak
+              ),
+              timestamp: Date.now(),
+              parentId: assistantMsgId,
+            };
+
+            currentConvs = currentConvs.map((c: Conversation) => {
+              if (c.id === convId) {
+                return {
+                  ...c,
+                  messages: [...c.messages, followUpMessage],
+                  activeMessageId: followUpMessage.id,
+                  updatedAt: Date.now(),
+                };
+              }
+              return c;
+            });
+            conversationsRef.current = currentConvs;
+            saveConversations(currentConvs);
+
+            step++;
+            continue;
           }
+          noToolCallStreak = 0;
 
 
           // Execute tool calls with circuit breaker + loop detection
