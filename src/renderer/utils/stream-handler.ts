@@ -77,6 +77,47 @@ export async function streamOnce(params: StreamOnceParams): Promise<StreamedChat
     });
   };
   return new Promise<StreamedChatCompletion>((resolve, reject) => {
+    const CHUNK_TIMEOUT_MS = 30_000;
+    const TOTAL_TIMEOUT_MS = 300_000;
+    let chunkTimer: NodeJS.Timeout | null = null;
+    let totalTimer: NodeJS.Timeout | null = null;
+
+    const clearTimers = () => {
+      if (chunkTimer) clearTimeout(chunkTimer);
+      if (totalTimer) clearTimeout(totalTimer);
+    };
+
+    const resetChunkTimer = () => {
+      if (chunkTimer) clearTimeout(chunkTimer);
+      chunkTimer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          cleanup();
+          cleanupRaf();
+          clearTimers();
+          const err = new Error('Stream chunk timeout: 30s no data') as Error & { status?: number; partialContent?: string };
+          err.status = responseStatus;
+          err.partialContent = fullResponse;
+          reject(err);
+        }
+      }, CHUNK_TIMEOUT_MS);
+    };
+
+    totalTimer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        cleanup();
+        cleanupRaf();
+        clearTimers();
+        const err = new Error('Stream total timeout: 5min exceeded') as Error & { status?: number; partialContent?: string };
+        err.status = responseStatus;
+        err.partialContent = fullResponse;
+        reject(err);
+      }
+    }, TOTAL_TIMEOUT_MS);
+
+    resetChunkTimer();
+
     const cleanup = electronSafe.onApiProxyStreamEvent((event) => {
       if (event.streamId !== streamId || settled) return;
 
@@ -89,6 +130,7 @@ export async function streamOnce(params: StreamOnceParams): Promise<StreamedChat
         settled = true;
         cleanup();
         cleanupRaf();
+        clearTimers();
         const err = new Error('API error: ' + (event.status || 0) + ' - ' + (event.body || '')) as Error & { status?: number; body?: string; partialContent?: string };
         err.status = event.status || 0;
         err.body = event.body || '';
@@ -98,6 +140,7 @@ export async function streamOnce(params: StreamOnceParams): Promise<StreamedChat
       }
 
       if (event.type === 'chunk' && event.text) {
+        resetChunkTimer();
         sseBuffer += event.text;
         const { frames, rest } = splitSseFrames(sseBuffer);
         sseBuffer = rest;
@@ -112,6 +155,7 @@ export async function streamOnce(params: StreamOnceParams): Promise<StreamedChat
               settled = true;
               cleanup();
               cleanupRaf();
+              clearTimers();
               resolve({
                 content: fullResponse,
                 reasoningContent: fullReasoning,
@@ -191,6 +235,7 @@ export async function streamOnce(params: StreamOnceParams): Promise<StreamedChat
         settled = true;
         cleanup();
         cleanupRaf();
+        clearTimers();
         resolve({
           content: fullResponse,
           reasoningContent: '',
@@ -224,6 +269,7 @@ export async function streamOnce(params: StreamOnceParams): Promise<StreamedChat
         settled = true;
         cleanup();
         cleanupRaf();
+        clearTimers();
         const err = new Error('API error: ' + apiResult.status + ' - ' + apiResult.body) as Error & { status?: number; body?: string; partialContent?: string };
         err.status = apiResult.status;
         err.body = apiResult.body;
@@ -233,6 +279,7 @@ export async function streamOnce(params: StreamOnceParams): Promise<StreamedChat
         settled = true;
         cleanup();
         cleanupRaf();
+        clearTimers();
         resolve({
           content: fullResponse,
           reasoningContent: fullReasoning,
@@ -250,6 +297,7 @@ export async function streamOnce(params: StreamOnceParams): Promise<StreamedChat
         settled = true;
         cleanup();
         cleanupRaf();
+        clearTimers();
         reject(err);
       }
     });

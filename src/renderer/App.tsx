@@ -2178,7 +2178,7 @@ return false; // Not handled
           }
         }
 
-        const MAX_STEPS = 30;
+        const MAX_STEPS = content?.startsWith('/goal') ? 80 : 40;
         let step = 0;
         const toolExecState = createToolExecState();
         const activeConvForToolGate = currentConvs.find((c: Conversation) => c.id === convId) || null;
@@ -2303,7 +2303,7 @@ return false; // Not handled
               } catch (err: any) {
                 const status = err?.status ?? 0;
                 const hasPartialContent = !!err?.partialContent;
-                const shouldRetry = isRetryableStatus(status) && !hasPartialContent && attempt < maxAttempts && isStreamingRef.current;
+                const shouldRetry = isRetryableStatus(status) && (!hasPartialContent || err.partialContent.length < 100) && attempt < maxAttempts && isStreamingRef.current;
 
                 if (!shouldRetry) {
                   throw err;
@@ -2451,6 +2451,28 @@ return false; // Not handled
           saveConversations(currentConvs);
 
           step++;
+        }
+
+        if (step >= MAX_STEPS && isStreamingRef.current) {
+          const limitMsg: ChatMessage = {
+            id: `msg_step_limit_${Date.now()}`,
+            role: 'assistant',
+            content: `⚠️ 已达到单轮最大执行步数 (${MAX_STEPS} 步)。如需继续，请发送"继续任务"。`,
+            timestamp: Date.now(),
+          };
+          currentConvs = currentConvs.map((c: Conversation) => {
+            if (c.id === convId) {
+              return {
+                ...c,
+                messages: [...c.messages, limitMsg],
+                activeMessageId: limitMsg.id,
+                updatedAt: Date.now()
+              };
+            }
+            return c;
+          });
+          conversationsRef.current = currentConvs;
+          saveConversations(currentConvs);
         }
 
         const endTime = Date.now();

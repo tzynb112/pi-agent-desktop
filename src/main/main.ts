@@ -1453,24 +1453,31 @@ async function runGoalInMainProcess(payload: GoalRunExecutePayload): Promise<Goa
       } catch {
         messages = [{ role: 'user', content: prompt }];
       }
-      const response = await fetch(`${payload.apiSettings.baseURL}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${payload.apiSettings.apiKey}`,
-          'X-Session-Id': payload.conversationId || run.id,
-        },
-        body: JSON.stringify({
-          model: payload.apiSettings.model,
-          messages,
-          temperature: payload.apiSettings.temperature ?? 0.3,
-          max_tokens: payload.apiSettings.maxTokens,
-          prompt_cache_key: (payload.conversationId || run.id).slice(0, 64),
-        }),
-      });
-      const body = await response.text();
-      if (!response.ok) throw new Error(`API error: ${response.status} - ${body}`);
-      return JSON.parse(body).choices?.[0]?.message?.content || '';
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 120_000);
+      try {
+        const response = await fetch(`${payload.apiSettings.baseURL}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${payload.apiSettings.apiKey}`,
+            'X-Session-Id': payload.conversationId || run.id,
+          },
+          body: JSON.stringify({
+            model: payload.apiSettings.model,
+            messages,
+            temperature: payload.apiSettings.temperature ?? 0.3,
+            max_tokens: payload.apiSettings.maxTokens,
+            prompt_cache_key: (payload.conversationId || run.id).slice(0, 64),
+          }),
+          signal: controller.signal,
+        });
+        const body = await response.text();
+        if (!response.ok) throw new Error(`API error: ${response.status} - ${body}`);
+        return JSON.parse(body).choices?.[0]?.message?.content || '';
+      } finally {
+        clearTimeout(timeoutId);
+      }
     };
 
     const goalExecutor = new GoalExecutor(
@@ -2138,15 +2145,22 @@ ipcMain.handle('execute-tool', async (_event: any, toolName: string, args: strin
 // API proxy to avoid CORS issues in renderer
 ipcMain.handle('api-proxy', async (_event, requestData: ApiProxyRequest): Promise<{ status: number; body: string }> => {
   try {
-    const response = await fetch(requestData.url, {
-      method: requestData.method,
-      headers: {
-        ...requestData.headers,
-      },
-      body: requestData.body,
-    });
-    const body = await response.text();
-    return { status: response.status, body };
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60_000);
+    try {
+      const response = await fetch(requestData.url, {
+        method: requestData.method,
+        headers: {
+          ...requestData.headers,
+        },
+        body: requestData.body,
+        signal: controller.signal,
+      });
+      const body = await response.text();
+      return { status: response.status, body };
+    } finally {
+      clearTimeout(timeoutId);
+    }
   } catch (err: any) {
     console.error(`[API] Fetch error for ${requestData.url}:`, err.message);
     return { status: 0, body: `fetch failed: ${err.message}` };
@@ -2162,37 +2176,44 @@ ipcMain.handle('api-proxy-stream', async (event, requestData: ApiProxyStreamRequ
   };
 
   try {
-    const response = await fetch(fetchData.url, {
-      method: fetchData.method,
-      headers: {
-        ...fetchData.headers,
-      },
-      body: fetchData.body,
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 300_000);
+    try {
+      const response = await fetch(fetchData.url, {
+        method: fetchData.method,
+        headers: {
+          ...fetchData.headers,
+        },
+        body: fetchData.body,
+        signal: controller.signal,
+      });
 
-    if (!response.ok || !response.body) {
-      const body = await response.text();
-      sendStreamEvent({ type: 'error', status: response.status, body });
-      return { status: response.status, body };
+      if (!response.ok || !response.body) {
+        const body = await response.text();
+        sendStreamEvent({ type: 'error', status: response.status, body });
+        return { status: response.status, body };
+      }
+
+      sendStreamEvent({ type: 'start', status: response.status });
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        sendStreamEvent({ type: 'chunk', text: decoder.decode(value, { stream: true }) });
+      }
+
+      const tail = decoder.decode();
+      if (tail) {
+        sendStreamEvent({ type: 'chunk', text: tail });
+      }
+
+      sendStreamEvent({ type: 'end', status: response.status });
+      return { status: response.status, body: '' };
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    sendStreamEvent({ type: 'start', status: response.status });
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      sendStreamEvent({ type: 'chunk', text: decoder.decode(value, { stream: true }) });
-    }
-
-    const tail = decoder.decode();
-    if (tail) {
-      sendStreamEvent({ type: 'chunk', text: tail });
-    }
-
-    sendStreamEvent({ type: 'end', status: response.status });
-    return { status: response.status, body: '' };
   } catch (err: any) {
     console.error(`[API] Streaming fetch error for ${fetchData.url}:`, err.message);
     const body = `fetch failed: ${err.message}`;

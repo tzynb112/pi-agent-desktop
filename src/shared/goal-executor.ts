@@ -185,27 +185,6 @@ function parseToolCalls(text: string): Array<{ name: string; arguments: string }
 function buildRetryHint(error: string, attempt: number): string {
   const lower = error.toLowerCase();
   const hints: string[] = [];
-  const retryPrefix = `Retry ${attempt + 1}:`;
-
-  if (lower.includes('enoent') || lower.includes('no such file') || lower.includes('not found')) {
-    return `${retryPrefix} confirm the path with read or a directory listing before modifying files.`;
-  }
-  if (lower.includes('permission') || lower.includes('access denied') || lower.includes('eacces')) {
-    return `${retryPrefix} check permissions and use a smaller, safer operation.`;
-  }
-  if (lower.includes('syntax') || lower.includes('unexpected token') || lower.includes('parse')) {
-    return `${retryPrefix} inspect the file or command syntax first, then retry with a minimal change.`;
-  }
-  if (lower.includes('timeout') || lower.includes('timed out')) {
-    return `${retryPrefix} split the operation into smaller commands and avoid long-running background work.`;
-  }
-  if (lower.includes('old_str not found') || lower.includes('old_str')) {
-    return `${retryPrefix} read the file first and use a shorter exact old_str.`;
-  }
-  if (lower.includes('command exited') || lower.includes('error:')) {
-    return `${retryPrefix} analyze the command output and try a different PowerShell-safe command.`;
-  }
-  return `${retryPrefix} analyze the failure and continue with a different, safer approach.`;
 
   if (lower.includes('enoent') || lower.includes('no such file') || lower.includes('not found')) {
       hints.push('文件或路径不存在 — 先用 read 或 bash ls 确认正确的路径再操作');
