@@ -1342,12 +1342,14 @@ async function executeGoalRunnerTool(toolName: string, args: string, toolCallId?
       case 'read': {
         const filePath = parsedArgs.file_path;
         if (!filePath) return 'Error: Missing file_path argument';
+        if (!path.isAbsolute(filePath)) return 'Error: file_path MUST be an absolute path (e.g. D:\\... or /Users/...). You provided a relative path.';
         return fs.readFileSync(filePath, 'utf-8');
       }
       case 'write': {
         const filePath = parsedArgs.file_path;
         const content = parsedArgs.content;
         if (!filePath) return 'Error: Missing file_path argument';
+        if (!path.isAbsolute(filePath)) return 'Error: file_path MUST be an absolute path (e.g. D:\\... or /Users/...). You provided a relative path.';
         if (content === undefined) return 'Error: Missing content argument';
         fs.mkdirSync(path.dirname(filePath), { recursive: true });
         fs.writeFileSync(filePath, content, 'utf-8');
@@ -1358,6 +1360,7 @@ async function executeGoalRunnerTool(toolName: string, args: string, toolCallId?
         const oldStr = parsedArgs.old_str;
         const newStr = parsedArgs.new_str || '';
         if (!filePath) return 'Error: Missing file_path argument';
+        if (!path.isAbsolute(filePath)) return 'Error: file_path MUST be an absolute path (e.g. D:\\... or /Users/...). You provided a relative path.';
         if (!oldStr) return 'Error: Missing old_str argument';
         const content = fs.readFileSync(filePath, 'utf-8');
         const matchCount = content.split(oldStr).length - 1;

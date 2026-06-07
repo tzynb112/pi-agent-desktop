@@ -9,7 +9,7 @@ export const TOOLS_DEFINITION = [
         properties: {
           file_path: {
             type: 'string',
-            description: 'The path to the file to read',
+            description: 'The absolute path to the file to read (e.g. D:\\project\\file.js). MUST be an absolute path.',
           },
         },
         required: ['file_path'],
@@ -26,7 +26,7 @@ export const TOOLS_DEFINITION = [
         properties: {
           file_path: {
             type: 'string',
-            description: 'The path to the file to write',
+            description: 'The absolute path to the file to write (e.g. D:\\project\\file.js). MUST be an absolute path.',
           },
           content: {
             type: 'string',
@@ -47,7 +47,7 @@ export const TOOLS_DEFINITION = [
         properties: {
           file_path: {
             type: 'string',
-            description: 'The path to the file to edit',
+            description: 'The absolute path to the file to edit (e.g. D:\\project\\file.js). MUST be an absolute path.',
           },
           old_str: {
             type: 'string',
