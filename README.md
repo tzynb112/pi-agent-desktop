@@ -1,13 +1,19 @@
-# PianoAgent
+# Pi Agent Desktop
 
-Electron + React + TypeScript desktop app for chat-driven coding, file operations, tool execution, and goal queue workflows.
+Pi Agent Desktop is an unofficial desktop client for the open-source Pi coding agent.
 
-## Download
+Pi Agent Desktop 是一个面向通用用户的桌面客户端，基于开源 Pi coding agent 构建。
 
-- Latest Windows release: [GitHub Releases](https://github.com/tzynb112/pi-agent-desktop/releases/latest)
+## Download / 下载
+
+Current release: `v1.0.5`
+
+- GitHub Releases: [Latest release](https://github.com/tzynb112/pi-agent-desktop/releases/latest)
+- Windows installer: [PianoAgent Desktop Setup 1.0.5.exe](https://github.com/tzynb112/pi-agent-desktop/releases/download/v1.0.5/PianoAgent%20Desktop%20Setup%201.0.5.exe)
+- Windows portable: [PianoAgent Desktop 1.0.5.exe](https://github.com/tzynb112/pi-agent-desktop/releases/download/v1.0.5/PianoAgent%20Desktop%201.0.5.exe)
 - Source build: `npm run start`
 
-## Quick Start
+## Quick Start / 快速开始
 
 1. Double-click `start.bat`.
 2. Or run:
@@ -18,7 +24,7 @@ npm run start
 
 The app starts the renderer on `http://localhost:9000` and opens the Electron window once the main process is ready.
 
-## Scripts
+## Scripts / 脚本
 
 ```bash
 npm run start
@@ -32,7 +38,7 @@ npm test
 - `typecheck`: runs TypeScript without emitting files
 - `test`: runs `verify_all.py`
 
-## Project Layout
+## Project Layout / 项目结构
 
 - `src/main/`: Electron main process, IPC handlers, file access, tool execution, persistence
 - `src/renderer/`: React UI, chat flow, goal runtime, settings, file tree, styles
@@ -45,29 +51,10 @@ Key entry points:
 - `src/renderer/index.tsx`
 - `src/renderer/index.html`
 
-## Notes
+## Notes / 说明
 
 - `src/renderer/index.html` is the renderer template used by webpack.
 - `node_modules/`, `dist/`, logs, and local tool directories are ignored from version control.
 - Local Codex workspace data lives under `.arts/` and `.codeartsdoer/` and is treated as environment state, not product code.
+- At the moment, the official release package is for Windows only.
 
-## 中文说明
-
-PianoAgent 是一个基于 Electron + React + TypeScript 的桌面端 AI 编程助手，支持：
-
-- 对话式编程
-- 文件读写与 shell 工具调用
-- 自定义工具与 MCP 工具
-- 目标队列与自动恢复
-
-### 下载
-
-- 最新 Windows 安装包： [GitHub Releases](https://github.com/tzynb112/pi-agent-desktop/releases/latest)
-- 源码运行：`npm run start`
-
-### 本地构建
-
-```bash
-npm run build
-npm run package:win
-```
