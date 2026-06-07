@@ -2,21 +2,14 @@
 
 Pi Agent Desktop 是一个面向普通用户的桌面客户端，基于开源 Pi coding agent 构建。
 
-## Download
+## Download / 下载
 
-中文下载：
+Current release: `v1.0.5`
 
-- [GitHub Releases](https://github.com/tzynb112/pi-agent-desktop/releases/tag/v1.0.3)
-- [Windows 安装包](https://github.com/tzynb112/pi-agent-desktop/releases/download/v1.0.3/Pi-Agent-Desktop-1.0.3-x64.exe)
-- [macOS 安装包](https://github.com/tzynb112/pi-agent-desktop/releases/download/v1.0.3/Pi-Agent-Desktop-1.0.3-arm64.dmg)
-- [Linux 安装包](https://github.com/tzynb112/pi-agent-desktop/releases/download/v1.0.3/Pi-Agent-Desktop-1.0.3.AppImage)
-
-English downloads:
-
-- [GitHub Releases](https://github.com/tzynb112/pi-agent-desktop/releases/tag/v1.0.3)
-- [Windows installer](https://github.com/tzynb112/pi-agent-desktop/releases/download/v1.0.3/Pi-Agent-Desktop-1.0.3-x64.exe)
-- [macOS installer](https://github.com/tzynb112/pi-agent-desktop/releases/download/v1.0.3/Pi-Agent-Desktop-1.0.3-arm64.dmg)
-- [Linux AppImage](https://github.com/tzynb112/pi-agent-desktop/releases/download/v1.0.3/Pi-Agent-Desktop-1.0.3.AppImage)
+- GitHub Releases: [Latest release](https://github.com/tzynb112/pi-agent-desktop/releases/latest)
+- Windows installer: [PianoAgent Desktop Setup 1.0.5.exe](https://github.com/tzynb112/pi-agent-desktop/releases/download/v1.0.5/PianoAgent%20Desktop%20Setup%201.0.5.exe)
+- Windows portable: [PianoAgent Desktop 1.0.5.exe](https://github.com/tzynb112/pi-agent-desktop/releases/download/v1.0.5/PianoAgent%20Desktop%201.0.5.exe)
+- Source build: `npm run start`
 
 ## Quick Start
 
@@ -55,4 +48,5 @@ Key entry points:
 
 - `src/renderer/index.html` is the renderer template used by webpack.
 - `node_modules/` and `dist/` are build outputs and stay out of version control.
-- 发布版本在 [GitHub Releases](https://github.com/tzynb112/pi-agent-desktop/releases/tag/v1.0.3) 页面下载。
+- 发布版本在 [GitHub Releases](https://github.com/tzynb112/pi-agent-desktop/releases/latest) 页面下载。
+- 目前正式发布包只有 Windows 版本。
