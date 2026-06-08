@@ -5,7 +5,7 @@
 
 export const API_CONFIG = {
   deepseek: {
-    baseURL: 'https://api.deepseek.com/v1',
+    baseURL: 'https://api.deepseek.com',
     apiKey: '',
     models: {
       flash: 'deepseek-v4-flash',

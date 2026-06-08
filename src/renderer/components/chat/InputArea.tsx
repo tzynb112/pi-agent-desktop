@@ -729,7 +729,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                         modelProfiles: updatedProfiles,
                       });
                     }}
-                    placeholder="https://api.deepseek.com/v1"
+                    placeholder="https://api.deepseek.com"
                     style={{
                       width: '100%',
                       padding: '6px 8px',

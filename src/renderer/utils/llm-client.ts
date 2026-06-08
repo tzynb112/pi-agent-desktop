@@ -1,4 +1,5 @@
 import { electronSafe } from './electron-safe';
+import { buildChatCompletionsUrl } from '../../shared/api-endpoints';
 
 export interface ChatMessageLike {
   role: string;
@@ -36,7 +37,7 @@ export async function callLLMApi({
   }
 
   const apiResult = await electronSafe.apiProxy({
-    url: `${baseURL}/chat/completions`,
+    url: buildChatCompletionsUrl(baseURL),
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

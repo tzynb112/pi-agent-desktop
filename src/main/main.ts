@@ -30,6 +30,7 @@ import {
   type ActiveGoalSnapshotState,
   type GoalQueueItemState,
 } from './goal-state';
+import { buildChatCompletionsUrl } from '../shared/api-endpoints';
 import {
   getAppStatePath,
   readJsonState,
@@ -1459,7 +1460,7 @@ async function runGoalInMainProcess(payload: GoalRunExecutePayload): Promise<Goa
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 120_000);
       try {
-        const response = await fetch(`${payload.apiSettings.baseURL}/chat/completions`, {
+        const response = await fetch(buildChatCompletionsUrl(payload.apiSettings.baseURL), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

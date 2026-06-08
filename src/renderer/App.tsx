@@ -22,6 +22,7 @@ import { callLLMApi } from './utils/llm-client';
 import { buildSystemPrompt as buildSystemPromptFromConfig } from './config/system-prompt';
 
 import { compactConversation } from './utils/compactor';
+import { buildChatCompletionsUrl } from '../shared/api-endpoints';
 
 import { sanitizeAssistantDisplayContent, sanitizeChatMessage} from './utils/message-sanitize';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -247,7 +248,7 @@ const App: React.FC = () => {
       const defaultProfile = {
         id: 'profile_default',
         name: '默认配置 (' + (settingsObj.model || 'Unknown') + ')',
-        baseURL: settingsObj.baseURL || DEFAULT_SETTINGS.baseURL || 'https://api.deepseek.com/v1',
+        baseURL: settingsObj.baseURL || DEFAULT_SETTINGS.baseURL || 'https://api.deepseek.com',
         apiKey: settingsObj.apiKey || DEFAULT_SETTINGS.apiKey || '',
         model: settingsObj.model || DEFAULT_SETTINGS.model || 'deepseek-v4-flash',
         reasoningEffort: settingsObj.reasoningEffort || DEFAULT_SETTINGS.reasoningEffort || 'none',
@@ -2233,7 +2234,7 @@ return false; // Not handled
           // Build API request body with tools and auto-reasoning
           const analysisCallLLM = async (prompt: string): Promise<string> => {
             const result = await electronSafe.apiProxy({
-              url: apiSettings.baseURL + '/chat/completions',
+              url: buildChatCompletionsUrl(apiSettings.baseURL),
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',

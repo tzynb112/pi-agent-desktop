@@ -50,7 +50,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   apiKey: '',
-  baseURL: 'https://api.deepseek.com/v1',
+  baseURL: 'https://api.deepseek.com',
   model: 'deepseek-v4-flash',
   temperature: 0.7,
   maxTokens: 4096,
@@ -92,7 +92,7 @@ export const DEFAULT_SETTINGS: Settings = {
     {
       id: 'profile_default',
       name: '默认配置 (deepseek-v4-flash)',
-      baseURL: 'https://api.deepseek.com/v1',
+      baseURL: 'https://api.deepseek.com',
       apiKey: '',
       model: 'deepseek-v4-flash',
       reasoningEffort: 'medium',

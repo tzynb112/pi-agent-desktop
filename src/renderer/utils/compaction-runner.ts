@@ -6,6 +6,7 @@
 import type { Conversation, ChatMessage } from '../types';
 import type { Settings } from '../config/default-settings';
 import { compactConversation } from './compactor';
+import { buildChatCompletionsUrl } from '../../shared/api-endpoints';
 
 export interface CompactionResult {
   conversations: Conversation[];
@@ -36,7 +37,7 @@ export async function runCompaction(
       async (prompt: string) => {
         if (!window.electronAPI?.apiProxy) throw new Error('Electron API is not available');
         const apiResult = await window.electronAPI.apiProxy({
-          url: apiSettings.baseURL + '/chat/completions',
+          url: buildChatCompletionsUrl(apiSettings.baseURL),
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

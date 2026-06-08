@@ -191,7 +191,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onSave, 
     const newProfile: ModelProfile = {
       id: `profile_${Date.now()}`,
       name: '新模型配置',
-      baseURL: 'https://api.deepseek.com/v1',
+      baseURL: 'https://api.deepseek.com',
       apiKey: '',
       model: 'deepseek-v4-flash',
       reasoningEffort: 'medium',
@@ -662,7 +662,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onSave, 
                   type="text"
                   value={settings.baseURL}
                   onChange={(e) => updateProfileAndRoot({ baseURL: e.target.value })}
-                  placeholder="https://api.deepseek.com/v1"
+                  placeholder="https://api.deepseek.com"
                   className="settings-input"
                 />
               </div>

@@ -10,6 +10,7 @@ import { sanitizeAssistantDisplayContent } from './message-sanitize';
 import { tryParseJson } from './json-heal';
 import type { ChatMessage } from '../types';
 import { electronSafe } from './electron-safe';
+import { buildChatCompletionsUrl } from '../../shared/api-endpoints';
 
 export interface StreamOnceParams {
   /** API base URL */
@@ -256,7 +257,7 @@ export async function streamOnce(params: StreamOnceParams): Promise<StreamedChat
 
     electronSafe.apiProxyStream({
       streamId,
-      url: baseURL + '/chat/completions',
+      url: buildChatCompletionsUrl(baseURL),
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
