@@ -201,6 +201,28 @@ const cancelledToolProcessIds = new Set<string>();
 let goalStateWatchdog: NodeJS.Timeout | null = null;
 let goalDispatchWatchdog: NodeJS.Timeout | null = null;
 
+function normalizeCustomToolArgs(rawArgs: any): Record<string, any> {
+  if (rawArgs === undefined || rawArgs === null || rawArgs === '') return {};
+
+  if (typeof rawArgs === 'string') {
+    try {
+      const parsed = JSON.parse(rawArgs);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed;
+      }
+      return { value: parsed };
+    } catch {
+      return { value: rawArgs };
+    }
+  }
+
+  if (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs)) {
+    return rawArgs;
+  }
+
+  return { value: rawArgs };
+}
+
 function recoverInterruptedGoalState(goal: any, now = Date.now()): any {
   // Regression sentinel: 主进程检测到执行中断
   return recoverInterruptedGoalStateShared(goal, now);
@@ -2079,7 +2101,7 @@ async function executeToolInternal(
     case 'executeCustomTool': {
       const { executeCustomTool } = require('./tool-creator');
       const name = parsedArgs.name;
-      const toolArgs = parsedArgs.arguments || {};
+      const toolArgs = normalizeCustomToolArgs(parsedArgs.arguments);
       if (!name) return { success: false, error: 'Missing tool name' };
       return await executeCustomTool(name, toolArgs);
     }
@@ -2090,7 +2112,7 @@ async function executeToolInternal(
         const customTools = loadCustomTools();
         const customTool = customTools.find((t: any) => t.name === toolName);
         if (customTool) {
-          return await executeCustomTool(toolName, parsedArgs);
+          return await executeCustomTool(toolName, normalizeCustomToolArgs(parsedArgs));
         }
       } catch {}
       return { success: false, error: `Unknown tool: ${toolName}` };

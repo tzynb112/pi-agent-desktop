@@ -3,7 +3,7 @@ import { truncateToolResult, isToolErrorResult, buildToolRecoveryHint } from './
 
 export const CIRCUIT_BREAKER_FAILURE_LIMIT = 3;
 export const CIRCUIT_BREAKER_LOOP_LIMIT = 5;
-export const DUPLICATE_CALL_LIMIT = 1;
+export const DUPLICATE_CALL_LIMIT = 3;
 
 export interface ToolExecState {
   recentToolCalls: Array<{ name: string; args: string }>;
@@ -45,7 +45,9 @@ export function processToolResult(
 
   if (recentSameSig > DUPLICATE_CALL_LIMIT && !isToolErrorResult(rawResult)) {
     finalResult += `\n\n[Duplicate Detection] You have called '${tc.name}' with the SAME arguments ${recentSameSig} times and it SUCCEEDED each time. This is a duplicate loop. The operation is already done - do NOT call this tool again with the same arguments. Tell the user the result and stop retrying.`;
-    shouldBreak = true;
+    if (recentSameSig >= DUPLICATE_CALL_LIMIT + 2) {
+      shouldBreak = true;
+    }
   }
 
   if (tc.name === 'bash' && !shouldBreak) {
@@ -58,19 +60,22 @@ export function processToolResult(
       }).length;
       if (sameFileOpens > DUPLICATE_CALL_LIMIT && !isToolErrorResult(rawResult)) {
         finalResult += `\n\n[Duplicate File Open] You have tried to open '${targetFile}' ${sameFileOpens} times using different methods. It has already been opened successfully. Do NOT try to open this file again by any method. Tell the user the file is open and stop.`;
-        shouldBreak = true;
+        if (sameFileOpens >= DUPLICATE_CALL_LIMIT + 2) {
+          shouldBreak = true;
+        }
       }
     }
   }
 
   const isBulkTool = tc.name === 'write' || tc.name === 'read' || tc.name === 'bash' || tc.name === 'edit';
-  const loopLimit = isBulkTool ? 15 : CIRCUIT_BREAKER_LOOP_LIMIT;
+  const isCustomTool = tc.name === 'executeCustomTool';
+  const loopLimit = isBulkTool ? 15 : isCustomTool ? 8 : CIRCUIT_BREAKER_LOOP_LIMIT;
 
   if (recentSameType >= loopLimit) {
     finalResult += `\n\n[CIRCUIT BREAKER] EMERGENCY STOP! You have called '${tc.name}' ${recentSameType} times recently. This is a loop. You MUST stop calling tools immediately and return a summary of what you have done so far.`;
     shouldBreak = true;
     state.recentToolCalls.length = 0;
-  } else if (recentSameType >= (isBulkTool ? 10 : 3) && !isToolErrorResult(rawResult)) {
+  } else if (recentSameType >= (isBulkTool ? 10 : isCustomTool ? 5 : 3) && !isToolErrorResult(rawResult)) {
     finalResult += `\n\n[Loop Detection] You have called '${tc.name}' ${recentSameType} times recently. If you are stuck, try a completely different approach or ask the user for clarification.`;
   }
 

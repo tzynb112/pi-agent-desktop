@@ -10,9 +10,10 @@
     "dev:main": "cross-env NODE_ENV=development tsc -p tsconfig.main.json && npm run copy:main-assets && cross-env NODE_ENV=development electron dist/main/main.js",
     "clean:dist": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "copy:main-assets": "node scripts/copy-main-assets.cjs",
+    "prepare:package-assets": "node scripts/prepare-package-assets.cjs",
     "prebuild": "npm run clean:dist",
     "build": "webpack --config webpack.renderer.config.js --mode production && tsc -p tsconfig.main.json && npm run copy:main-assets",
-    "package:win": "npm run build && electron-builder --win nsis portable --publish never",
+    "package:win": "npm run build && npm run prepare:package-assets && electron-builder --win nsis portable --publish never",
     "typecheck": "tsc --noEmit",
     "test": "python verify_all.py"
   },
@@ -35,13 +36,13 @@
     "directories": {
       "output": "release"
     },
-    "icon": "src/main/icon.ico",
+    "icon": "build/icon.ico",
     "files": [
       "dist/**/*",
       "package.json"
     ],
     "win": {
-      "icon": "src/main/icon.ico",
+      "icon": "build/icon.ico",
       "target": [
         "nsis",
         "portable"
