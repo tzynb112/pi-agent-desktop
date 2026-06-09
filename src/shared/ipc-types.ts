@@ -70,6 +70,9 @@ export interface GoalRunExecutePayload extends GoalRunStartPayload {
     model: string;
     temperature?: number;
     maxTokens?: number;
+    sandboxType?: 'none' | 'docker' | 'guard';
+    dangerousKeywords?: string;
+    trustMode?: boolean;
   };
   existingGoal?: any;
   maxConcurrentAgents?: number;

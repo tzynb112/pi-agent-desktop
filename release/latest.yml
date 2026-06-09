@@ -1,8 +1,8 @@
 version: 1.0.17
 files:
   - url: PianoAgent-Desktop-Setup-1.0.17.exe
-    sha512: FWi36lsYxrgfxCQzURRdLP1dRDYpa0oWCwVb9qVCVYU3vTXS7mxQ7xAVDqB9CSQYgSkzmgYqqPWKb+XOjDGjdw==
-    size: 80335915
+    sha512: rao6lcWCH2pMLj4jY/o4WwZC7xCrwaZ0cSVwYRV8JyZaSXD+bN5R5c9ss0gmce7skobo9ev5VbZ5hJSRGD/UEw==
+    size: 80337869
 path: PianoAgent-Desktop-Setup-1.0.17.exe
-sha512: FWi36lsYxrgfxCQzURRdLP1dRDYpa0oWCwVb9qVCVYU3vTXS7mxQ7xAVDqB9CSQYgSkzmgYqqPWKb+XOjDGjdw==
-releaseDate: '2026-06-09T01:56:00.599Z'
+sha512: rao6lcWCH2pMLj4jY/o4WwZC7xCrwaZ0cSVwYRV8JyZaSXD+bN5R5c9ss0gmce7skobo9ev5VbZ5hJSRGD/UEw==
+releaseDate: '2026-06-09T05:39:31.055Z'

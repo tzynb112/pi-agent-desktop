@@ -51,6 +51,23 @@ import {
 
 const execAsync = promisify(exec);
 const APP_USER_MODEL_ID = 'com.tzynb112.pianoagentdesktop';
+const DEFAULT_DANGEROUS_KEYWORDS = [
+  'rm',
+  'del',
+  'format',
+  'rd',
+  'rmdir',
+  'shutdown',
+  'remove-item',
+  'removeitem',
+  'taskkill',
+  'stop-process',
+  'stopprocess',
+  'kill',
+  'pkill',
+  'killall',
+  'erase',
+];
 
 if (process.platform === 'win32') {
   app.setAppUserModelId(APP_USER_MODEL_ID);
@@ -170,6 +187,12 @@ interface GoalRunEventState {
   type: string;
   message?: string;
   goalId?: string;
+}
+
+interface ToolExecutionOptions {
+  sandboxType?: 'none' | 'docker' | 'guard';
+  dangerousKeywords?: string;
+  trustMode?: boolean;
 }
 
 const mcpClients = new Map<string, McpClient>();
@@ -1301,90 +1324,12 @@ async function executeGoalRunnerTool(toolName: string, args: string, toolCallId?
   }
 
   try {
-    switch (toolName) {
-      case 'read': {
-        const filePath = parsedArgs.file_path;
-        if (!filePath) return 'Error: Missing file_path argument';
-        if (!path.isAbsolute(filePath)) return 'Error: file_path MUST be an absolute path (e.g. D:\\... or /Users/...). You provided a relative path.';
-        return fs.readFileSync(filePath, 'utf-8');
-      }
-      case 'write': {
-        const filePath = parsedArgs.file_path;
-        const content = parsedArgs.content;
-        if (!filePath) return 'Error: Missing file_path argument';
-        if (!path.isAbsolute(filePath)) return 'Error: file_path MUST be an absolute path (e.g. D:\\... or /Users/...). You provided a relative path.';
-        if (content === undefined) return 'Error: Missing content argument';
-        fs.mkdirSync(path.dirname(filePath), { recursive: true });
-        fs.writeFileSync(filePath, content, 'utf-8');
-        return `File written successfully: ${filePath}`;
-      }
-      case 'edit': {
-        const filePath = parsedArgs.file_path;
-        const oldStr = parsedArgs.old_str;
-        const newStr = parsedArgs.new_str || '';
-        if (!filePath) return 'Error: Missing file_path argument';
-        if (!path.isAbsolute(filePath)) return 'Error: file_path MUST be an absolute path (e.g. D:\\... or /Users/...). You provided a relative path.';
-        if (!oldStr) return 'Error: Missing old_str argument';
-        const content = fs.readFileSync(filePath, 'utf-8');
-        const matchCount = content.split(oldStr).length - 1;
-        if (matchCount === 0) return 'Error: old_str not found in file';
-        if (matchCount > 1) return `Error: old_str found ${matchCount} times in file; provide a more unique string.`;
-        fs.writeFileSync(filePath, content.replace(oldStr, newStr), 'utf-8');
-        return `File edited successfully: ${filePath}`;
-      }
-      case 'bash': {
-        const command = parsedArgs.command;
-        const cwd = typeof parsedArgs.cwd === 'string' && parsedArgs.cwd.trim() ? parsedArgs.cwd.trim() : undefined;
-        if (!command) return 'Error: Missing command argument';
-        const isWindows = process.platform === 'win32';
-        const shellToUse = isWindows ? 'powershell.exe' : '/bin/bash';
-        const finalCommand = isWindows
-          ? [
-              'chcp 65001 >$null;',
-              '$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false);',
-              '[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false);',
-              "$env:PYTHONIOENCODING='utf-8';",
-              normalizeWindowsShellCommand(command),
-            ].join(' ')
-          : command;
-        const shellArgs = isWindows
-          ? ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', finalCommand]
-          : ['-c', finalCommand];
-        const child = spawn(shellToUse, shellArgs, {
-          timeout: 120000,
-          windowsHide: true,
-          env: { ...process.env, PYTHONIOENCODING: 'utf-8', LANG: 'zh_CN.UTF-8', LC_ALL: 'zh_CN.UTF-8' },
-          cwd,
-        });
-        const activeProcessId = toolCallId || `goal_bash_${Date.now()}_${child.pid || Math.random().toString(36).slice(2, 8)}`;
-        activeToolProcesses.set(activeProcessId, child);
-        child.once('close', () => activeToolProcesses.delete(activeProcessId));
-        const stdoutChunks: Buffer[] = [];
-        const stderrChunks: Buffer[] = [];
-        let spawnErrorMessage = '';
-        child.stdout?.on('data', (chunk) => stdoutChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-        child.stderr?.on('data', (chunk) => stderrChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-        const exitResult = await new Promise<{ code: number | null; signal: string | null }>((resolve) => {
-          child.on('close', (code, signal) => resolve({ code, signal }));
-          child.on('error', (err) => {
-            spawnErrorMessage = err.message || String(err);
-            resolve({ code: -1, signal: null });
-          });
-        });
-        const output = decodeToolOutputBuffer(Buffer.concat(stdoutChunks)) || decodeToolOutputBuffer(Buffer.concat(stderrChunks)) || '(no output)';
-        if (cancelledToolProcessIds.has(activeProcessId)) {
-          cancelledToolProcessIds.delete(activeProcessId);
-          return 'Error: Command cancelled by user';
-        }
-        cancelledToolProcessIds.delete(activeProcessId);
-        if (exitResult.signal === 'SIGTERM' || exitResult.signal === 'SIGKILL' || child.killed) return 'Error: Command timed out after 120s';
-        if (exitResult.code === -1 && spawnErrorMessage) return `Error: ${enrichWindowsErrorMsg(spawnErrorMessage, command)}`;
-        if (exitResult.code !== 0) return `Error: Command exited with code ${exitResult.code}\n${enrichWindowsErrorMsg(output, command)}`;
-        return output;
-      }
-      default:
-        return `Error: Unknown goal tool: ${toolName}`;
-    }
+    const result = await executeToolInternal(toolName, parsedArgs, toolCallId, {
+      sandboxType: 'guard',
+      dangerousKeywords: '',
+      trustMode: true,
+    });
+    return result.success ? (result.result || 'Tool executed successfully') : `Error: ${result.error}`;
   } catch (err: any) {
     return `Error: ${err.message || 'Tool execution failed'}`;
   }
@@ -1448,7 +1393,20 @@ async function runGoalInMainProcess(payload: GoalRunExecutePayload): Promise<Goa
 
     const goalExecutor = new GoalExecutor(
       callLLM,
-      (toolName, args) => executeGoalRunnerTool(toolName, args, `main_goal_tool_${Date.now()}`),
+      async (toolName, args) => {
+        let parsedArgs: any = {};
+        try {
+          parsedArgs = JSON.parse(args || '{}');
+        } catch (err: any) {
+          return `Error: Invalid tool arguments JSON: ${err.message}`;
+        }
+        const result = await executeToolInternal(toolName, parsedArgs, `main_goal_tool_${Date.now()}`, {
+          sandboxType: payload.apiSettings.sandboxType,
+          dangerousKeywords: payload.apiSettings.dangerousKeywords,
+          trustMode: payload.apiSettings.trustMode,
+        });
+        return result.success ? (result.result || 'Tool executed successfully') : `Error: ${result.error}`;
+      },
       payload.maxConcurrentAgents || 1,
       () => {
         const control = readGoalRunControlState(run.id);
@@ -1689,6 +1647,457 @@ function normalizeWindowsShellCommand(command: string): string {
   return normalized;
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function buildDangerousKeywordPattern(keyword: string): RegExp | null {
+  const normalized = keyword.trim().toLowerCase();
+  if (!normalized) return null;
+
+  const parts = normalized.split('-').map(escapeRegExp);
+  const body = parts.join('[-\\s]?');
+  return new RegExp(`(^|[^a-z0-9])${body}(?=$|[^a-z0-9])`, 'i');
+}
+
+function getDangerousKeywords(rawKeywords?: string): string[] {
+  const customKeywords = (rawKeywords || '')
+    .split(/[,\r\n]+/)
+    .map((keyword) => keyword.trim().toLowerCase())
+    .filter(Boolean);
+
+  return Array.from(new Set([...DEFAULT_DANGEROUS_KEYWORDS, ...customKeywords]));
+}
+
+function findDangerousCommandMatch(command: string, rawKeywords?: string): string | null {
+  const keywords = getDangerousKeywords(rawKeywords);
+  const normalizedCommand = command.toLowerCase();
+
+  for (const keyword of keywords) {
+    const pattern = buildDangerousKeywordPattern(keyword);
+    if (pattern && pattern.test(normalizedCommand)) {
+      return keyword;
+    }
+  }
+
+  return null;
+}
+
+function buildToolExecutionOptions(options?: ToolExecutionOptions): Required<ToolExecutionOptions> {
+  return {
+    sandboxType: options?.sandboxType ?? 'guard',
+    dangerousKeywords: options?.dangerousKeywords ?? '',
+    trustMode: options?.trustMode ?? true,
+  };
+}
+
+function prepareBashCommand(
+  parsedArgs: any,
+  options?: ToolExecutionOptions
+): { command: string; cwd?: string } | { error: string } {
+  const command = parsedArgs.command;
+  const cwd = typeof parsedArgs.cwd === 'string' && parsedArgs.cwd.trim() ? parsedArgs.cwd.trim() : undefined;
+  if (!command) {
+    return { error: 'Missing command argument' };
+  }
+
+  const executionOptions = buildToolExecutionOptions(options);
+  const lowerCmd = command.toLowerCase();
+  if (
+    (lowerCmd.includes('taskkill') || lowerCmd.includes('stop-process') || lowerCmd.includes('pkill') || lowerCmd.includes('killall')) &&
+    (lowerCmd.includes('node') || lowerCmd.includes('electron'))
+  ) {
+    return {
+      error: 'Safety block: blocked command attempting to terminate the Node/Electron host process. Use taskkill /PID only for targeted cleanup.',
+    };
+  }
+
+  const userApproved = parsedArgs.__dangerousApproved === true;
+  if (!executionOptions.trustMode && (executionOptions.sandboxType === 'guard' || executionOptions.sandboxType === 'docker')) {
+    const matchedKeyword = findDangerousCommandMatch(command, executionOptions.dangerousKeywords);
+    if (matchedKeyword && !userApproved) {
+      return {
+        error: `Safety block: command requires explicit approval because it matches dangerous keyword "${matchedKeyword}".`,
+      };
+    }
+  }
+
+  let finalCommand = command;
+  if (executionOptions.sandboxType === 'docker') {
+    const mountPath = cwd || '.';
+    const escapedMount = mountPath.replace(/\\/g, '/');
+    const escapedCmd = command.replace(/"/g, '\\"');
+    finalCommand = `docker run --rm -v "${escapedMount}:/workspace" -w /workspace node:18-alpine sh -c "${escapedCmd}"`;
+  }
+
+  return { command: finalCommand, cwd };
+}
+
+async function executeToolInternal(
+  toolName: string,
+  parsedArgs: any,
+  toolCallId?: string,
+  options?: ToolExecutionOptions
+): Promise<ToolExecutionResult> {
+  switch (toolName) {
+    case 'read': {
+      const filePath = parsedArgs.file_path;
+      if (!filePath) return { success: false, error: 'Missing file_path argument' };
+      try {
+        if (toolCallId && mainWindow) {
+          mainWindow.webContents.send('tool-live-output', { toolCallId, text: `Reading file: ${filePath}...\n` });
+        }
+        const content = fs.readFileSync(filePath, 'utf-8');
+        console.log(`[Tool] Read ${filePath}: ${content.length} chars`);
+        if (toolCallId && mainWindow) {
+          mainWindow.webContents.send('tool-live-output', { toolCallId, text: `File read complete: ${filePath} (${content.length} chars)\n` });
+        }
+        return { success: true, result: content };
+      } catch (err: any) {
+        console.error(`[Tool] Read error:`, err.message);
+        return { success: false, error: err.message };
+      }
+    }
+
+    case 'write': {
+      const filePath = parsedArgs.file_path;
+      const content = parsedArgs.content;
+      if (!filePath) return { success: false, error: 'Missing file_path argument' };
+      if (content === undefined) return { success: false, error: 'Missing content argument' };
+      try {
+        const dir = path.dirname(filePath);
+        if (dir && !fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+        const CHUNK_SIZE = 65536;
+        if (content.length > CHUNK_SIZE && toolCallId && mainWindow) {
+          const stream = fs.createWriteStream(filePath, { encoding: 'utf-8' });
+          let offset = 0;
+          await new Promise<void>((resolve, reject) => {
+            stream.on('error', reject);
+            function writeNext() {
+              let ok = true;
+              while (ok && offset < content.length) {
+                const chunk = content.substring(offset, Math.min(offset + CHUNK_SIZE, content.length));
+                offset += chunk.length;
+                ok = stream.write(chunk);
+                const progress = Math.min(100, Math.floor((offset / content.length) * 100));
+                mainWindow!.webContents.send('tool-live-output', { toolCallId, text: `Writing: ${filePath} ${progress}% (${offset}/${content.length} chars)\n` });
+              }
+              if (offset >= content.length) {
+                stream.end(resolve);
+              } else {
+                stream.once('drain', writeNext);
+              }
+            }
+            writeNext();
+          });
+        } else {
+          if (toolCallId && mainWindow) {
+            mainWindow.webContents.send('tool-live-output', { toolCallId, text: `Writing file: ${filePath} (${content.length} chars)...\n` });
+          }
+          fs.writeFileSync(filePath, content, 'utf-8');
+        }
+        console.log(`[Tool] Wrote ${filePath}: ${content.length} chars`);
+        if (toolCallId && mainWindow) {
+          mainWindow.webContents.send('tool-live-output', { toolCallId, text: `File write complete: ${filePath} (${content.length} chars)\n` });
+        }
+        return { success: true, result: `File written successfully: ${filePath}` };
+      } catch (err: any) {
+        console.error(`[Tool] Write error:`, err.message);
+        return { success: false, error: err.message };
+      }
+    }
+
+    case 'edit': {
+      const filePath = parsedArgs.file_path;
+      const oldStr = parsedArgs.old_str;
+      const newStr = parsedArgs.new_str || '';
+      if (!filePath) return { success: false, error: 'Missing file_path argument' };
+      if (!oldStr) return { success: false, error: 'Missing old_str argument' };
+      try {
+        if (toolCallId && mainWindow) {
+          mainWindow.webContents.send('tool-live-output', { toolCallId, text: `Editing file: ${filePath}...\n` });
+        }
+        let content = fs.readFileSync(filePath, 'utf-8');
+
+        if (content.includes(oldStr)) {
+          const matchCount = content.split(oldStr).length - 1;
+          if (matchCount > 1) {
+            return { success: false, error: `old_str found ${matchCount} times in file. Please provide a more unique string to target the correct location.` };
+          }
+          content = content.replace(oldStr, newStr);
+          fs.writeFileSync(filePath, content, 'utf-8');
+          console.log(`[Tool] Edited ${filePath} (exact)`);
+          if (toolCallId && mainWindow) {
+            mainWindow.webContents.send('tool-live-output', { toolCallId, text: `File edit complete: ${filePath}\n` });
+          }
+          return { success: true, result: `File edited successfully: ${filePath}` };
+        }
+
+        const fuzzyResult = fuzzyEdit(content, oldStr, newStr);
+        if (fuzzyResult.success && fuzzyResult.content) {
+          fs.writeFileSync(filePath, fuzzyResult.content, 'utf-8');
+          console.log(`[Tool] Edited ${filePath} (fuzzy: ${fuzzyResult.method}, similarity: ${fuzzyResult.similarity?.toFixed(2)})`);
+          if (toolCallId && mainWindow) {
+            mainWindow.webContents.send('tool-live-output', { toolCallId, text: `File edit complete: ${filePath} (${fuzzyResult.method})\n` });
+          }
+          return { success: true, result: `File edited successfully: ${filePath} (matched via ${fuzzyResult.method})` };
+        }
+
+        return { success: false, error: 'old_str not found in file' };
+      } catch (err: any) {
+        console.error(`[Tool] Edit error:`, err.message);
+        return { success: false, error: err.message };
+      }
+    }
+
+    case 'bash': {
+      const prepared = prepareBashCommand(parsedArgs, options);
+      if ('error' in prepared) {
+        return { success: false, error: prepared.error };
+      }
+      const command = prepared.command;
+      const cwd = prepared.cwd;
+      try {
+        const env = {
+          ...process.env,
+          PYTHONIOENCODING: 'utf-8',
+          NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --enable-source-maps`.trim(),
+          LANG: 'zh_CN.UTF-8',
+          LC_ALL: 'zh_CN.UTF-8',
+          LESSCHARSET: 'utf-8',
+          GIT_CONFIG_COUNT: '2',
+          GIT_CONFIG_KEY_0: 'core.quotepath',
+          GIT_CONFIG_VALUE_0: 'false',
+          GIT_CONFIG_KEY_1: 'i18n.logOutputEncoding',
+          GIT_CONFIG_VALUE_1: 'utf-8',
+        };
+
+        const isWindows = process.platform === 'win32';
+        const shellToUse = isWindows ? 'powershell.exe' : '/bin/bash';
+        const finalCommand = isWindows
+          ? [
+              'chcp 65001 >$null;',
+              '$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false);',
+              '[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false);',
+              "$env:PYTHONIOENCODING='utf-8';",
+              "$env:LANG='zh_CN.UTF-8';",
+              normalizeWindowsShellCommand(command),
+            ].join(' ')
+          : command;
+
+        const shellArgs = isWindows
+          ? ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', finalCommand]
+          : ['-c', finalCommand];
+        const child = spawn(shellToUse, shellArgs, {
+          timeout: 120000,
+          windowsHide: true,
+          env,
+          cwd,
+        });
+        const activeProcessId = toolCallId || `bash_${Date.now()}_${child.pid || Math.random().toString(36).slice(2, 8)}`;
+        activeToolProcesses.set(activeProcessId, child);
+        child.once('close', () => {
+          activeToolProcesses.delete(activeProcessId);
+        });
+
+        let stdoutAccumulator = '';
+        let stderrAccumulator = '';
+        const stdoutChunks: Buffer[] = [];
+        const stderrChunks: Buffer[] = [];
+        const stdoutLiveDecoder = new TextDecoder('utf-8', { fatal: false });
+        const stderrLiveDecoder = new TextDecoder('utf-8', { fatal: false });
+        let spawnErrorMessage = '';
+
+        child.stdout?.on('data', (chunk) => {
+          const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+          stdoutChunks.push(buffer);
+          const text = stdoutLiveDecoder.decode(buffer, { stream: true });
+          stdoutAccumulator += text;
+          if (toolCallId && mainWindow) {
+            mainWindow.webContents.send('tool-live-output', { toolCallId, text });
+          }
+        });
+
+        child.stderr?.on('data', (chunk) => {
+          const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+          stderrChunks.push(buffer);
+          const text = stderrLiveDecoder.decode(buffer, { stream: true });
+          stderrAccumulator += text;
+          if (toolCallId && mainWindow) {
+            mainWindow.webContents.send('tool-live-output', { toolCallId, text });
+          }
+        });
+
+        const exitResult = await new Promise<{ code: number | null, signal: string | null }>((resolve) => {
+          child.on('close', (code, signal) => {
+            resolve({ code, signal });
+          });
+          child.on('error', (err) => {
+            console.error('[Tool] Spawn error:', err);
+            spawnErrorMessage = err.message || String(err);
+            resolve({ code: -1, signal: null });
+          });
+        });
+
+        console.log(`[Tool] Bash executed: ${command} with code ${exitResult.code} signal ${exitResult.signal}`);
+        const stdoutTail = stdoutLiveDecoder.decode();
+        const stderrTail = stderrLiveDecoder.decode();
+        if (stdoutTail) stdoutAccumulator += stdoutTail;
+        if (stderrTail) stderrAccumulator += stderrTail;
+        const finalStdout = decodeToolOutputBuffer(Buffer.concat(stdoutChunks)) || stdoutAccumulator;
+        const finalStderr = decodeToolOutputBuffer(Buffer.concat(stderrChunks)) || stderrAccumulator;
+
+        if (cancelledToolProcessIds.has(activeProcessId)) {
+          cancelledToolProcessIds.delete(activeProcessId);
+          return { success: false, error: 'Command cancelled by user' };
+        }
+        cancelledToolProcessIds.delete(activeProcessId);
+
+        if (exitResult.signal === 'SIGTERM' || exitResult.signal === 'SIGKILL' || child.killed) {
+          return { success: false, error: 'Command timed out after 120s' };
+        }
+
+        if (exitResult.code === -1 && spawnErrorMessage) {
+          const enriched = enrichWindowsErrorMsg(spawnErrorMessage, command);
+          return { success: false, error: enriched };
+        }
+
+        const combinedOutput = finalStdout || finalStderr || '(no output)';
+
+        if (exitResult.code !== 0) {
+          const enriched = enrichWindowsErrorMsg(combinedOutput, command);
+          return { success: false, error: `Command exited with code ${exitResult.code}\n${enriched}` };
+        }
+
+        const guiLaunchPatterns = /Start-Process|Invoke-Item|\bstart\s|xdg-open|\bopen\s|cmd\s*\/c\s*start/i;
+        const isGuiLaunch = guiLaunchPatterns.test(command);
+        if (isGuiLaunch && exitResult.code === 0) {
+          const guiMessage = combinedOutput === '(no output)'
+            ? 'Command executed successfully. The GUI process (browser or application) has been launched and should be visible on the user\'s desktop. No console output is expected for GUI commands.'
+            : `Command executed successfully. Output: ${combinedOutput}. The GUI process is running and visible on the user's desktop.`;
+          return { success: true, result: `${guiMessage} IMPORTANT: This command SUCCEEDED. The file/application IS open. Do NOT say it might not have opened. Do NOT suggest the user open it manually. Do NOT retry this command.` };
+        }
+
+        return { success: true, result: combinedOutput };
+      } catch (err: any) {
+        console.error(`[Tool] Spawn catch error:`, err.message);
+        const enrichedMsg = enrichWindowsErrorMsg(err.message || 'Command execution failed', command);
+        return { success: false, error: enrichedMsg };
+      }
+    }
+
+    case 'web': {
+      const url = parsedArgs.url;
+      if (!url) return { success: false, error: 'Missing url argument' };
+      try {
+        const { scrapeUrl } = require('./web-scraper');
+        const result = await scrapeUrl(url, {
+          maxLength: parsedArgs.max_length || 15000,
+          extractLinks: parsedArgs.extract_links !== false,
+        });
+        if (result.success) {
+          let output = '';
+          if (result.title) output += `Title: ${result.title}\n`;
+          output += `URL: ${result.url}\n\n`;
+          output += result.content || '(empty page)';
+          if (result.links && result.links.length > 0) {
+            output += '\n\n--- Links ---\n';
+            output += result.links.map((l: any) => `- [${l.text}](${l.href})`).join('\n');
+          }
+          return { success: true, result: output };
+        }
+        return { success: false, error: result.error || 'Failed to fetch URL' };
+      } catch (err: any) {
+        return { success: false, error: err.message };
+      }
+    }
+
+    case 'config': {
+      const action = parsedArgs.action || 'read';
+      const key = parsedArgs.key;
+      const value = parsedArgs.value;
+      try {
+        const { executeConfigOperation } = require('./config-tool');
+        const result = executeConfigOperation({ action, key, value });
+        if (result.success) {
+          if (action === 'set' && mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('settings-changed', { key, value });
+          }
+          return { success: true, result: result.message || JSON.stringify(result.value, null, 2) };
+        }
+        return { success: false, error: result.error || 'Config operation failed' };
+      } catch (err: any) {
+        return { success: false, error: err.message };
+      }
+    }
+
+    case 'createTool': {
+      const { saveCustomTool } = require('./tool-creator');
+      const toolDef = {
+        name: parsedArgs.name,
+        description: parsedArgs.description || '',
+        parameters: parsedArgs.parameters || {},
+        script: parsedArgs.script || '',
+        language: parsedArgs.language || 'javascript',
+      };
+      if (!toolDef.name || !toolDef.script) {
+        return { success: false, error: 'Missing name or script for createTool' };
+      }
+      const result = saveCustomTool(toolDef);
+      if (result.success) {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('custom-tools-changed');
+        }
+        return { success: true, result: `Tool "${toolDef.name}" created successfully. It can now be called with the executeTool tool.` };
+      }
+      return { success: false, error: result.error };
+    }
+
+    case 'deleteTool': {
+      const { deleteCustomTool } = require('./tool-creator');
+      const name = parsedArgs.name;
+      if (!name) return { success: false, error: 'Missing tool name' };
+      const result = deleteCustomTool(name);
+      if (result.success) {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('custom-tools-changed');
+        }
+        return { success: true, result: `Tool "${name}" deleted` };
+      }
+      return { success: false, error: result.error };
+    }
+
+    case 'listTools': {
+      const { loadCustomTools } = require('./tool-creator');
+      const tools = loadCustomTools();
+      const summary = tools.map((t: any) => `- ${t.name}: ${t.description} (${t.language})`).join('\n');
+      return { success: true, result: tools.length > 0 ? `Custom tools:\n${summary}` : 'No custom tools created yet.' };
+    }
+
+    case 'executeCustomTool': {
+      const { executeCustomTool } = require('./tool-creator');
+      const name = parsedArgs.name;
+      const toolArgs = parsedArgs.arguments || {};
+      if (!name) return { success: false, error: 'Missing tool name' };
+      return await executeCustomTool(name, toolArgs);
+    }
+
+    default: {
+      try {
+        const { loadCustomTools, executeCustomTool } = require('./tool-creator');
+        const customTools = loadCustomTools();
+        const customTool = customTools.find((t: any) => t.name === toolName);
+        if (customTool) {
+          return await executeCustomTool(toolName, parsedArgs);
+        }
+      } catch {}
+      return { success: false, error: `Unknown tool: ${toolName}` };
+    }
+  }
+}
+
 function decodeToolOutputChunk(chunk: Buffer): string {
   const utf8Text = chunk.toString('utf8');
   if (!utf8Text.includes('\uFFFD')) return utf8Text;
@@ -1727,7 +2136,9 @@ ipcMain.handle('execute-tool', async (_event: any, toolName: string, args: strin
       return { success: false, error: `Invalid tool arguments: ${parseErr.message}` };
     }
     console.log(`[Tool] Executing ${toolName} with args:`, parsedArgs);
-    
+    return await executeToolInternal(toolName, parsedArgs, toolCallId);
+
+    /* Legacy inline handler kept temporarily during refactor.
     switch (toolName) {
       case 'read': {
         const filePath = parsedArgs.file_path;
@@ -2108,6 +2519,7 @@ ipcMain.handle('execute-tool', async (_event: any, toolName: string, args: strin
         } catch {}
         return { success: false, error: `Unknown tool: ${toolName}` };
     }
+    */
   } catch (err: any) {
     console.error(`[Tool] General error:`, err.message);
     return { success: false, error: err.message || 'Tool execution failed' };

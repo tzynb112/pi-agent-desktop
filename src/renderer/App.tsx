@@ -1304,6 +1304,8 @@ const App: React.FC = () => {
               if (!approved) {
                 return 'Error: 操作已被用户安全拦截。';
               }
+              parsedArgs.__dangerousApproved = true;
+              finalArguments = JSON.stringify(parsedArgs);
             }
           }
 
@@ -1701,6 +1703,9 @@ return false; // Not handled
                 model: apiSettings.model,
                 temperature: apiSettings.temperature,
                 maxTokens: apiSettings.maxTokens,
+                sandboxType: apiSettings.sandboxType,
+                dangerousKeywords: apiSettings.dangerousKeywords,
+                trustMode: apiSettings.trustMode,
               },
               maxConcurrentAgents: 1,
             });
