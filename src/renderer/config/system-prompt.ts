@@ -10,6 +10,7 @@
 
 export interface SystemPromptOptions {
   agentName?: string;
+  workspaceName?: string;
   selectedTools?: string[];
   toolSnippets?: Record<string, string>;
   promptGuidelines?: string[];
@@ -51,6 +52,13 @@ function getPlatformInfo(): { platform: string; shell: string; commands: string 
   };
 }
 
+function inferWorkspaceName(cwd?: string): string | null {
+  if (!cwd) return null;
+  const normalized = cwd.replace(/\\/g, '/').replace(/\/+$/, '');
+  const parts = normalized.split('/').filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1] : null;
+}
+
 /** Default tool snippets — one-line descriptions for each built-in tool */
 const DEFAULT_TOOL_SNIPPETS: Record<string, string> = {
   read: 'Read file contents',
@@ -77,7 +85,7 @@ const BASE_GUIDELINES: string[] = [
   'After editing files, mention the changed files and the verification you ran.',
   'Write full, complete, production-ready code on the very first try. NEVER write stubs, drafts, or simple placeholders.',
   'Always specify absolute file paths.',
-  'CRITICAL: To avoid output token limits, NEVER rewrite multiple large files in a single turn. Write or edit ONE file per response, then briefly state what you will do next and wait for the user to say "continue".',
+  'Keep momentum on active coding tasks. Do not stop after every file; continue until the requested change is complete or you hit a genuine blocker that needs the user.',
 ];
 
 /**
@@ -86,6 +94,7 @@ const BASE_GUIDELINES: string[] = [
 export function buildSystemPrompt(options: SystemPromptOptions = {}): string {
   const {
     agentName = 'PianoAgent',
+    workspaceName,
     selectedTools = Object.keys(DEFAULT_TOOL_SNIPPETS),
     toolSnippets = DEFAULT_TOOL_SNIPPETS,
     promptGuidelines = [],
@@ -99,6 +108,7 @@ export function buildSystemPrompt(options: SystemPromptOptions = {}): string {
   const now = new Date();
   const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const promptCwd = (cwd || '').replace(/\\/g, '/');
+  const workspaceLabel = workspaceName || inferWorkspaceName(cwd) || 'current workspace';
 
   // --- Tools list ---
   const visibleTools = selectedTools.filter((name) => !!toolSnippets[name]);
@@ -123,6 +133,8 @@ export function buildSystemPrompt(options: SystemPromptOptions = {}): string {
   if (hasBash) {
     add(`Detect the current platform and use appropriate commands. On ${platformInfo.platform}, the shell is ${platformInfo.shell}. ${platformInfo.commands}`);
   }
+  add('Treat the open workspace as the user project. Do not assume the assistant app itself is the target project unless the user explicitly asks you to edit the app.');
+  add('If no project folder is open, ask the user to open the intended workspace before making file changes rather than guessing a default project.');
 
   for (const g of BASE_GUIDELINES) add(g);
   for (const g of promptGuidelines) add(g);
@@ -203,7 +215,7 @@ To delete a custom tool:
 Always use ABSOLUTE paths when possible. On Windows use D:\\folder\\file, on Unix use /home/user/file.`;
 
   // --- Assemble prompt ---
-  let prompt = `You are an expert coding assistant named ${agentName} operating inside PianoAgent, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.
+  let prompt = `You are an expert coding assistant named ${agentName} operating inside the ${workspaceLabel} workspace. You help users by reading files, executing commands, editing code, and writing new files.
 
 CRITICAL ENVIRONMENT INFO: You are running on ${platformInfo.platform}. The shell is ${platformInfo.shell}.
 
@@ -215,7 +227,7 @@ ${toolFormatInstructions}
 Guidelines:
 ${guidelinesText}
 
-When the user asks about PianoAgent itself, its commands, settings, or features, refer them to:
+When the user asks about this app itself, its commands, settings, or features, refer them to:
 - /help — list all available commands
 - /doctor — check environment health
 - /settings — open the configuration center
@@ -254,12 +266,12 @@ When the user asks about PianoAgent itself, its commands, settings, or features,
 /** Static system prompt for backward compatibility */
 export const SYSTEM_PROMPT = buildSystemPrompt();
 
-export const WELCOME_MESSAGE = `你好，我是 PianoAgent
+export const WELCOME_MESSAGE = `你好，我是 PianoAgent。
 
-你的 AI 编程助手，可以帮你：
-- 代码审查
-- 解决问题
-- 编写代码
-- 解释概念
+我是一个面向当前工作区的编程助手，可以帮你：
+- 读文件和改代码
+- 跑命令和排查错误
+- 继续未完成的任务
+- 解释项目里的实现细节
 
-有什么我可以帮你的吗？`;
+如果你已经打开了一个项目，我会默认把它当作当前工作区来处理。`;

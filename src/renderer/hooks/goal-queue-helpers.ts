@@ -1,5 +1,6 @@
-﻿import { GoalQueueItem, GoalQueueEvent, GoalRunMeta } from '../types';
+import { GoalQueueItem, GoalQueueEvent, GoalRunMeta } from '../types';
 import type { Goal, Agent } from '../../shared/goal-executor';
+import { getWorkspacePath, getWorkspaceStorageKey } from '../utils/workspace-context';
 import {
   GOAL_RUNNING_LEASE_MS,
   buildResumeSourceFromGoal as buildResumeSourceFromGoalInQueue,
@@ -14,10 +15,31 @@ import {
   inheritResumeSourceInQueue,
   type GoalQueueTransition,
 } from '../utils/goal-queue';
-export const ACTIVE_GOAL_STORAGE_KEY = 'piano-active-goal';
-export const GOAL_QUEUE_STORAGE_KEY = 'piano-goal-queue';
-export const ACTIVE_GOAL_APP_STATE_KEY = 'active-goal';
-export const GOAL_QUEUE_APP_STATE_KEY = 'goal-queue';
+
+const ACTIVE_GOAL_STORAGE_BASE_KEY = 'piano-active-goal';
+const GOAL_QUEUE_STORAGE_BASE_KEY = 'piano-goal-queue';
+const ACTIVE_GOAL_APP_STATE_BASE_KEY = 'active-goal';
+const GOAL_QUEUE_APP_STATE_BASE_KEY = 'goal-queue';
+
+function resolveWorkspacePath(workspacePath?: string | null): string | null {
+  return workspacePath ?? getWorkspacePath();
+}
+
+export function getActiveGoalStorageKey(workspacePath?: string | null): string {
+  return getWorkspaceStorageKey(ACTIVE_GOAL_STORAGE_BASE_KEY, resolveWorkspacePath(workspacePath));
+}
+
+export function getGoalQueueStorageKey(workspacePath?: string | null): string {
+  return getWorkspaceStorageKey(GOAL_QUEUE_STORAGE_BASE_KEY, resolveWorkspacePath(workspacePath));
+}
+
+export function getActiveGoalAppStateKey(workspacePath?: string | null): string {
+  return getWorkspaceStorageKey(ACTIVE_GOAL_APP_STATE_BASE_KEY, resolveWorkspacePath(workspacePath));
+}
+
+export function getGoalQueueAppStateKey(workspacePath?: string | null): string {
+  return getWorkspaceStorageKey(GOAL_QUEUE_APP_STATE_BASE_KEY, resolveWorkspacePath(workspacePath));
+}
 
 export interface ActiveGoalSnapshot {
   conversationId: string;
@@ -49,11 +71,11 @@ export function goalQueueStatusLabel(status: GoalQueueItem['status']): string {
   }
 }
 
-export function recoverInterruptedGoalQueue(queue: GoalQueueItem[]): GoalQueueItem[] {
+export function recoverInterruptedGoalQueue(queue: GoalQueueItem[], workspacePath?: string | null): GoalQueueItem[] {
   const result = recoverInterruptedGoalQueueInMemory(queue);
 
   if (result.changed) {
-    saveGoalQueue(result.queue);
+    saveGoalQueue(result.queue, workspacePath);
   }
   return result.queue;
 }
@@ -70,9 +92,9 @@ export function removeAppState(key: string): void {
   });
 }
 
-export function clearActiveGoalSnapshot(): void {
-  localStorage.removeItem(ACTIVE_GOAL_STORAGE_KEY);
-  removeAppState(ACTIVE_GOAL_APP_STATE_KEY);
+export function clearActiveGoalSnapshot(workspacePath?: string | null): void {
+  localStorage.removeItem(getActiveGoalStorageKey(workspacePath));
+  removeAppState(getActiveGoalAppStateKey(workspacePath));
 }
 
 export function clearTriggeredAutoResumeGoal(
@@ -97,23 +119,23 @@ export function getActiveGoalSnapshotFreshness(snapshot: ActiveGoalSnapshot | nu
   return snapshot.meta?.savedAt || snapshot.goal?.updatedAt || snapshot.savedAt || 0;
 }
 
-export function loadGoalQueue(recoverInterrupted = false): GoalQueueItem[] {
+export function loadGoalQueue(recoverInterrupted = false, workspacePath?: string | null): GoalQueueItem[] {
   try {
-    const raw = localStorage.getItem(GOAL_QUEUE_STORAGE_KEY);
+    const raw = localStorage.getItem(getGoalQueueStorageKey(workspacePath));
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return recoverInterrupted ? recoverInterruptedGoalQueue(parsed) : parsed;
+    return recoverInterrupted ? recoverInterruptedGoalQueue(parsed, workspacePath) : parsed;
   } catch {
-    localStorage.removeItem(GOAL_QUEUE_STORAGE_KEY);
+    localStorage.removeItem(getGoalQueueStorageKey(workspacePath));
     return [];
   }
 }
 
-export function saveGoalQueue(queue: GoalQueueItem[]): void {
+export function saveGoalQueue(queue: GoalQueueItem[], workspacePath?: string | null): void {
   const trimmed = queue.slice(0, 20);
-  localStorage.setItem(GOAL_QUEUE_STORAGE_KEY, JSON.stringify(trimmed));
-  persistAppState(GOAL_QUEUE_APP_STATE_KEY, trimmed);
+  localStorage.setItem(getGoalQueueStorageKey(workspacePath), JSON.stringify(trimmed));
+  persistAppState(getGoalQueueAppStateKey(workspacePath), trimmed);
 }
 
 export function upsertGoalQueueItem(
@@ -122,9 +144,10 @@ export function upsertGoalQueueItem(
   agents: Agent[],
   meta: GoalRunMeta,
   statusOverride?: GoalQueueItem['status'],
-  event?: GoalQueueEvent
+  event?: GoalQueueEvent,
+  workspacePath?: string | null
 ): GoalQueueItem[] {
-  const queue = loadGoalQueue();
+  const queue = loadGoalQueue(false, workspacePath);
   const now = Date.now();
   const existingIndex = queue.findIndex((item) => item.id === goal.id);
   const existingItem = existingIndex >= 0 ? queue[existingIndex] : undefined;
@@ -155,39 +178,39 @@ export function upsertGoalQueueItem(
     ? queue.map((oldItem, index) => (index === existingIndex ? item : oldItem))
     : [item, ...queue];
 
-  saveGoalQueue(next);
+  saveGoalQueue(next, workspacePath);
   return next;
 }
 
-export function removeGoalQueueItem(goalId: string): GoalQueueItem[] {
-  const next = loadGoalQueue().filter((item) => item.id !== goalId);
-  saveGoalQueue(next);
+export function removeGoalQueueItem(goalId: string, workspacePath?: string | null): GoalQueueItem[] {
+  const next = loadGoalQueue(false, workspacePath).filter((item) => item.id !== goalId);
+  saveGoalQueue(next, workspacePath);
   return next;
 }
 
-export function removeGoalQueueItemsForConversation(conversationId: string): GoalQueueItem[] {
-  const next = loadGoalQueue().filter((item) => item.conversationId !== conversationId);
-  saveGoalQueue(next);
+export function removeGoalQueueItemsForConversation(conversationId: string, workspacePath?: string | null): GoalQueueItem[] {
+  const next = loadGoalQueue(false, workspacePath).filter((item) => item.conversationId !== conversationId);
+  saveGoalQueue(next, workspacePath);
   return next;
 }
 
-export function updateGoalQueueItem(goalId: string, patch: Partial<GoalQueueItem>, event?: GoalQueueEvent): GoalQueueItem[] {
-  const next = updateGoalQueueItemInQueue(loadGoalQueue(), goalId, patch, event);
-  saveGoalQueue(next);
+export function updateGoalQueueItem(goalId: string, patch: Partial<GoalQueueItem>, event?: GoalQueueEvent, workspacePath?: string | null): GoalQueueItem[] {
+  const next = updateGoalQueueItemInQueue(loadGoalQueue(false, workspacePath), goalId, patch, event);
+  saveGoalQueue(next, workspacePath);
   return next;
 }
 
-export function transitionGoalQueueItem(goalId: string, transition: GoalQueueTransition): GoalQueueItem[] {
-  const next = transitionGoalQueueItemInQueue(loadGoalQueue(), goalId, transition);
-  saveGoalQueue(next);
+export function transitionGoalQueueItem(goalId: string, transition: GoalQueueTransition, workspacePath?: string | null): GoalQueueItem[] {
+  const next = transitionGoalQueueItemInQueue(loadGoalQueue(false, workspacePath), goalId, transition);
+  saveGoalQueue(next, workspacePath);
   return next;
 }
 
-export function recoverStaleRunningGoalQueue(now = Date.now(), leaseMs = GOAL_RUNNING_LEASE_MS): { queue: GoalQueueItem[]; changed: boolean; recoveredIds: string[] } {
-  const result = recoverStaleRunningGoalQueueInMemory(loadGoalQueue(), now, leaseMs);
+export function recoverStaleRunningGoalQueue(now = Date.now(), leaseMs = GOAL_RUNNING_LEASE_MS, workspacePath?: string | null): { queue: GoalQueueItem[]; changed: boolean; recoveredIds: string[] } {
+  const result = recoverStaleRunningGoalQueueInMemory(loadGoalQueue(false, workspacePath), now, leaseMs);
 
   if (result.changed) {
-    saveGoalQueue(result.queue);
+    saveGoalQueue(result.queue, workspacePath);
   }
   return result;
 }
@@ -196,41 +219,42 @@ export function buildResumeSourceFromGoal(
   conversationId: string,
   goal: Goal,
   agents: Agent[] = [],
-  meta?: GoalRunMeta | null
+  meta?: GoalRunMeta | null,
+  workspacePath?: string | null
 ): GoalQueueItem {
-  const result = buildResumeSourceFromGoalInQueue(loadGoalQueue(), conversationId, goal, agents, meta);
-  saveGoalQueue(result.queue);
+  const result = buildResumeSourceFromGoalInQueue(loadGoalQueue(false, workspacePath), conversationId, goal, agents, meta);
+  saveGoalQueue(result.queue, workspacePath);
   return result.item;
 }
 
-export function markResumeSourceTransferred(source: GoalQueueItem, targetGoalId?: string): GoalQueueItem[] {
-  const next = markResumeSourceTransferredInQueue(loadGoalQueue(), source, targetGoalId);
-  saveGoalQueue(next);
+export function markResumeSourceTransferred(source: GoalQueueItem, targetGoalId?: string, workspacePath?: string | null): GoalQueueItem[] {
+  const next = markResumeSourceTransferredInQueue(loadGoalQueue(false, workspacePath), source, targetGoalId);
+  saveGoalQueue(next, workspacePath);
   return next;
 }
 
-export function mergeGoalQueueItem(item: GoalQueueItem): GoalQueueItem[] {
-  const queue = loadGoalQueue();
+export function mergeGoalQueueItem(item: GoalQueueItem, workspacePath?: string | null): GoalQueueItem[] {
+  const queue = loadGoalQueue(false, workspacePath);
   const exists = queue.some((queueItem) => queueItem.id === item.id);
   const next = exists
     ? queue.map((queueItem) => queueItem.id === item.id ? item : queueItem)
     : [item, ...queue];
-  saveGoalQueue(next);
+  saveGoalQueue(next, workspacePath);
   return next;
 }
 
-export async function completeResumeSource(source: GoalQueueItem, targetGoalId?: string): Promise<GoalQueueItem[]> {
+export async function completeResumeSource(source: GoalQueueItem, targetGoalId?: string, workspacePath?: string | null): Promise<GoalQueueItem[]> {
   const completed = await window.electronAPI?.completeGoalQueueItem?.(source.id, targetGoalId).catch(() => null);
   if (completed) {
-    return mergeGoalQueueItem(completed);
+    return mergeGoalQueueItem(completed, workspacePath);
   }
-  return markResumeSourceTransferred(source, targetGoalId);
+  return markResumeSourceTransferred(source, targetGoalId, workspacePath);
 }
 
-export async function failResumeSource(source: GoalQueueItem, note: string): Promise<GoalQueueItem[]> {
+export async function failResumeSource(source: GoalQueueItem, note: string, workspacePath?: string | null): Promise<GoalQueueItem[]> {
   const failed = await window.electronAPI?.failGoalQueueItem?.(source.id, note).catch(() => null);
   if (failed) {
-    return mergeGoalQueueItem(failed);
+    return mergeGoalQueueItem(failed, workspacePath);
   }
   return transitionGoalQueueItem(source.id, {
     status: 'failed',
@@ -238,11 +262,11 @@ export async function failResumeSource(source: GoalQueueItem, note: string): Pro
     note,
     failureCount: (source.meta?.failureCount || 0) + 1,
     autoResumeEnabled: false,
-  });
+  }, workspacePath);
 }
 
-export function inheritResumeSource(newGoalId: string, source: GoalQueueItem): GoalQueueItem[] {
-  const next = inheritResumeSourceInQueue(loadGoalQueue(), newGoalId, source);
-  saveGoalQueue(next);
+export function inheritResumeSource(newGoalId: string, source: GoalQueueItem, workspacePath?: string | null): GoalQueueItem[] {
+  const next = inheritResumeSourceInQueue(loadGoalQueue(false, workspacePath), newGoalId, source);
+  saveGoalQueue(next, workspacePath);
   return next;
 }

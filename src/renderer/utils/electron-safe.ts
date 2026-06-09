@@ -132,9 +132,9 @@ export const electronSafe = {
     return { success: false, error: 'Electron API is not available' };
   },
 
-  readLatestRunningGoalRun: async (): Promise<any | null> => {
+  readLatestRunningGoalRun: async (workspacePath?: string | null): Promise<any | null> => {
     if (window.electronAPI?.readLatestRunningGoalRun) {
-      return window.electronAPI.readLatestRunningGoalRun();
+      return window.electronAPI.readLatestRunningGoalRun(workspacePath);
     }
     return null;
   },

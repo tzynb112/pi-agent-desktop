@@ -1,3 +1,10 @@
+﻿import {
+  isToolErrorResult as sharedIsToolErrorResult,
+  parseXmlToolCalls,
+  type ToolDefinitionLike,
+} from './tool-protocol';
+import { createToolExecState, processToolResult } from './tool-exec-loop';
+
 /**
 
  * Goal Executor - Multi-agent long-running goal execution system
@@ -27,6 +34,8 @@ export interface SubTask {
   progress?: number;  // 0-100
   attempts?: number;
   filesChanged?: string[];  // Files modified by this sub-task
+  verified?: boolean;
+  verificationEvidence?: string[];
   currentTool?: { name: string; target: string; startedAt: number };  // Currently executing tool
   recentTools?: Array<{ name: string; target: string; success: boolean; at: number }>;  // Recent tool history
 }
@@ -91,15 +100,7 @@ async function retryAsync<T>(
 }
 
 function isToolErrorResult(result: string): boolean {
-  const lower = (result || '').toLowerCase();
-  return lower.startsWith('error:') ||
-    lower.includes('tool failed') ||
-    lower.includes('command exited with code') ||
-    lower.includes('old_str not found') ||
-    lower.includes('permission denied') ||
-    lower.includes('enoent') ||
-    lower.includes('access denied') ||
-    lower.includes('工具失败');
+  return sharedIsToolErrorResult(result) || (result || '').includes('工具失败');
 }
 
 const isToolError = isToolErrorResult;
@@ -145,38 +146,35 @@ export async function executeSubTask(
   callLLM: (prompt: string) => Promise<string>,
   executeTool: (toolName: string, args: string) => Promise<string>,
   onProgress?: (progress: number) => void,
-  onToolCall?: (toolName: string, target: string, result?: string, success?: boolean) => void
+  onToolCall?: (toolName: string, target: string, result?: string, success?: boolean) => void,
+  shouldStop?: GoalStopChecker
 ): Promise<string> {
-  return executeReliableSubTask(task, goal, callLLM, executeTool, onProgress, onToolCall);
+  const result = await executeReliableSubTaskDetailed(
+    task,
+    goal,
+    callLLM,
+    executeTool,
+    onProgress,
+    onToolCall,
+    shouldStop
+  );
+  return result.summary;
 }
 /**
  * Parse tool calls from LLM response 閳?optimized single-pass regex
  */
 function parseToolCalls(text: string): Array<{ name: string; arguments: string }> {
-  const toolCalls: Array<{ name: string; arguments: string }> = [];
-  // Match any XML tool tag: <name>...</name> where name is one of the allowed tools
-  const blockRegex = /<(read|write|edit|bash)>([\s\S]*?)<\/\1>/g;
-  const paramRegex = /<(\w+)>([\s\S]*?)<\/\1>/g;
-  let blockMatch: RegExpExecArray | null;
+  const toolDefinitions: ToolDefinitionLike[] = [
+    { function: { name: 'read', parameters: { required: ['file_path'] } } },
+    { function: { name: 'write', parameters: { required: ['file_path', 'content'] } } },
+    { function: { name: 'edit', parameters: { required: ['file_path', 'old_str', 'new_str'] } } },
+    { function: { name: 'bash', parameters: { required: ['command'] } } },
+  ];
 
-  while ((blockMatch = blockRegex.exec(text)) !== null) {
-    const toolName = blockMatch[1];
-    const innerContent = blockMatch[2].trim();
-    const args: Record<string, string> = {};
-    let paramMatch: RegExpExecArray | null;
-
-    // Reset lastIndex for paramRegex since we reuse it
-    paramRegex.lastIndex = 0;
-    while ((paramMatch = paramRegex.exec(innerContent)) !== null) {
-      args[paramMatch[1]] = paramMatch[2].trim();
-    }
-
-    if (Object.keys(args).length > 0) {
-      toolCalls.push({ name: toolName, arguments: JSON.stringify(args) });
-    }
-  }
-
-  return toolCalls;
+  return parseXmlToolCalls(text, toolDefinitions).map((toolCall) => ({
+    name: toolCall.name,
+    arguments: toolCall.arguments,
+  }));
 }
 
 /**
@@ -206,6 +204,200 @@ function buildRetryHint(error: string, attempt: number): string {
   hints.push(`第 ${attempt + 1} 次重试: 请不要重复之前失败的操作，换一种完全不同的方法。`);
 
   return hints.join('\n');
+}
+
+type TaskAction = {
+  tool: string;
+  success: boolean;
+  target: string;
+  content?: string;
+  oldStr?: string;
+  newStr?: string;
+};
+
+type TaskExecutionResult = {
+  summary: string;
+  actionsTaken: TaskAction[];
+  changedFiles: string[];
+  verified: boolean;
+  verificationEvidence: string[];
+  finalAssistantResponse: string;
+};
+
+type GoalStopSignal = {
+  action: 'pause' | 'cancel' | 'stop';
+  reason?: string;
+};
+
+type GoalStopChecker = (() => GoalStopSignal | null | undefined) | undefined;
+
+function taskTouchesFiles(task: SubTask, actionsTaken: TaskAction[]): boolean {
+  if (actionsTaken.some((action) => action.tool === 'write' || action.tool === 'edit')) {
+    return true;
+  }
+  return /(implement|fix|modify|edit|build|test)/i.test(task.description);
+}
+
+function hasVerificationAction(actionsTaken: TaskAction[]): boolean {
+  return collectVerificationEvidence(actionsTaken).length > 0;
+}
+
+function collectVerificationEvidence(actionsTaken: TaskAction[]): string[] {
+  let sawMutation = false;
+  const evidence: string[] = [];
+  for (const action of actionsTaken) {
+    if (!action.success) continue;
+    if (action.tool === 'write' || action.tool === 'edit') {
+      sawMutation = true;
+      continue;
+    }
+    if (action.tool === 'read' && sawMutation) {
+      evidence.push(`read:${action.target || '(no target)'}`);
+    }
+    if (action.tool === 'bash' && /(npm run typecheck|npm test|npm run build|pytest|tsc|eslint|vitest|jest)/i.test(action.target)) {
+      evidence.push(`bash:${action.target}`);
+    }
+  }
+  return Array.from(new Set(evidence));
+}
+function collectChangedFilesFromActions(actionsTaken: TaskAction[]): string[] {
+  return Array.from(new Set(
+    actionsTaken
+      .filter((action) => action.success && (action.tool === 'write' || action.tool === 'edit'))
+      .map((action) => action.target)
+      .filter(Boolean)
+  ));
+}
+function isPlanSafeForParallel(plan: GoalPlan): boolean {
+  return !plan.subTasks.some((task) =>
+    /(edit|write|modify|fix|implement|install|build|test)/i.test(task.description)
+  );
+}
+
+function createGoalStopError(signal: GoalStopSignal): Error {
+  const verb = signal.action === 'pause' ? 'paused' : 'stopped';
+  return new Error(signal.reason || `Goal execution ${verb} by ${signal.action} request`);
+}
+
+function checkForGoalStop(shouldStop?: GoalStopChecker): void {
+  const signal = shouldStop?.();
+  if (signal) {
+    throw createGoalStopError(signal);
+  }
+}
+
+function taskLikelyMutatesProject(description: string): boolean {
+  return /(edit|write|modify|fix|implement|install|build|test|refactor|create|delete|rename|update)/i.test(description);
+}
+
+function taskLooksLikeVerification(description: string): boolean {
+  return /(verify|validation|validate|test|typecheck|build|lint|review|check)/i.test(description);
+}
+
+function defaultGoalPlan(goal: Goal): GoalPlan {
+  return {
+    goal: goal.description,
+    subTasks: [
+      {
+        id: 'task_1',
+        description: `Inspect the current project state and identify the concrete files or commands needed for: ${goal.description}`,
+        dependencies: [],
+        estimatedComplexity: 'medium',
+      },
+      {
+        id: 'task_2',
+        description: `Implement the requested changes for: ${goal.description}`,
+        dependencies: ['task_1'],
+        estimatedComplexity: 'high',
+      },
+      {
+        id: 'task_3',
+        description: 'Run relevant validation, summarize changes, and report any remaining risks.',
+        dependencies: ['task_2'],
+        estimatedComplexity: 'low',
+      },
+    ],
+    estimatedTime: 30,
+    parallelExecution: false,
+  };
+}
+
+function normalizeGoalPlan(goal: Goal, plan: GoalPlan): GoalPlan {
+  if (!plan.subTasks || !Array.isArray(plan.subTasks) || plan.subTasks.length === 0) {
+    throw new Error('Invalid plan structure: missing subTasks array');
+  }
+
+  const usedIds = new Set<string>();
+  const normalizedSubTasks = plan.subTasks.map((task, index) => {
+    const baseId = typeof task.id === 'string' && task.id.trim() ? task.id.trim() : `task_${index + 1}`;
+    let id = baseId;
+    let suffix = 2;
+    while (usedIds.has(id)) {
+      id = `${baseId}_${suffix++}`;
+    }
+    usedIds.add(id);
+
+    return {
+      id,
+      description: (task.description || `Execute part ${index + 1} of: ${goal.description}`).trim(),
+      dependencies: Array.isArray(task.dependencies) ? task.dependencies.filter((dep) => typeof dep === 'string' && dep.trim()) : [],
+      estimatedComplexity: task.estimatedComplexity || 'medium' as const,
+    };
+  });
+
+  const validIds = new Set(normalizedSubTasks.map((task) => task.id));
+  const rewrittenSubTasks = normalizedSubTasks.map((task) => ({
+    ...task,
+    dependencies: Array.from(new Set(task.dependencies.filter((dep) => dep !== task.id && validIds.has(dep)))),
+  }));
+
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const byId = new Map(rewrittenSubTasks.map((task) => [task.id, task]));
+
+  const visit = (taskId: string): void => {
+    if (visited.has(taskId)) return;
+    if (visiting.has(taskId)) {
+      throw new Error(`Invalid plan structure: cyclic dependency detected at ${taskId}`);
+    }
+    visiting.add(taskId);
+    const task = byId.get(taskId);
+    for (const dep of task?.dependencies || []) {
+      visit(dep);
+    }
+    visiting.delete(taskId);
+    visited.add(taskId);
+  };
+
+  for (const task of rewrittenSubTasks) {
+    visit(task.id);
+  }
+
+  const needsVerification = rewrittenSubTasks.some((task) => taskLikelyMutatesProject(task.description));
+  const hasVerificationTask = rewrittenSubTasks.some((task) => taskLooksLikeVerification(task.description));
+
+  if (needsVerification && !hasVerificationTask) {
+    const lastTaskId = rewrittenSubTasks[rewrittenSubTasks.length - 1]?.id;
+    rewrittenSubTasks.push({
+      id: `task_${rewrittenSubTasks.length + 1}`,
+      description: 'Run relevant validation, inspect changed files if needed, and summarize any remaining risks.',
+      dependencies: lastTaskId ? [lastTaskId] : [],
+      estimatedComplexity: 'low',
+    });
+  }
+
+  const normalizedPlan: GoalPlan = {
+    goal: plan.goal || goal.description,
+    estimatedTime: Number.isFinite(plan.estimatedTime) ? plan.estimatedTime : 30,
+    parallelExecution: !!plan.parallelExecution,
+    subTasks: rewrittenSubTasks,
+  };
+
+  if (!isPlanSafeForParallel(normalizedPlan)) {
+    normalizedPlan.parallelExecution = false;
+  }
+
+  return normalizedPlan;
 }
 
 async function generateReliableGoalPlan(
@@ -246,7 +438,8 @@ Rules:
 2. Preserve dependency order. Do not mark tasks parallel unless they are truly independent.
 3. Avoid vague tasks such as "analyze the goal" unless analysis produces a concrete artifact.
 4. Include a final verification subtask when code or files may change.
-5. Return JSON only, with no markdown.`;
+5. Set "parallelExecution" to false whenever any subtask may read or write files, run build/test commands, install dependencies, or affect shared project state.
+6. Return JSON only, with no markdown.`;
 
   try {
     const response = await retryAsync(() => callLLM(prompt), 3, 'generate reliable goal plan');
@@ -254,48 +447,10 @@ Rules:
     if (!jsonMatch) throw new Error('Failed to parse plan JSON from LLM response');
 
     const plan = JSON.parse(jsonMatch[0]) as GoalPlan;
-    if (!plan.subTasks || !Array.isArray(plan.subTasks) || plan.subTasks.length === 0) {
-      throw new Error('Invalid plan structure: missing subTasks array');
-    }
-
-    return {
-      goal: plan.goal || goal.description,
-      estimatedTime: Number.isFinite(plan.estimatedTime) ? plan.estimatedTime : 30,
-      parallelExecution: !!plan.parallelExecution,
-      subTasks: plan.subTasks.map((task, index) => ({
-        id: task.id || `task_${index + 1}`,
-        description: task.description || `Execute part ${index + 1} of: ${goal.description}`,
-        dependencies: Array.isArray(task.dependencies) ? task.dependencies : [],
-        estimatedComplexity: task.estimatedComplexity || 'medium',
-      })),
-    };
+    return normalizeGoalPlan(goal, plan);
   } catch (err: any) {
     console.error('[GoalExecutor] Failed to generate reliable plan:', err);
-    return {
-      goal: goal.description,
-      subTasks: [
-        {
-          id: 'task_1',
-          description: `Inspect the current project state and identify the concrete files or commands needed for: ${goal.description}`,
-          dependencies: [],
-          estimatedComplexity: 'medium',
-        },
-        {
-          id: 'task_2',
-          description: `Implement the requested changes for: ${goal.description}`,
-          dependencies: ['task_1'],
-          estimatedComplexity: 'high',
-        },
-        {
-          id: 'task_3',
-          description: 'Run relevant validation, summarize changes, and report any remaining risks.',
-          dependencies: ['task_2'],
-          estimatedComplexity: 'low',
-        },
-      ],
-      estimatedTime: 30,
-      parallelExecution: false,
-    };
+    return defaultGoalPlan(goal);
   }
 }
 
@@ -305,8 +460,22 @@ async function executeReliableSubTask(
   callLLM: (prompt: string) => Promise<string>,
   executeTool: (toolName: string, args: string) => Promise<string>,
   onProgress?: (progress: number) => void,
-  onToolCall?: (toolName: string, target: string, result?: string, success?: boolean) => void
+  onToolCall?: (toolName: string, target: string, result?: string, success?: boolean) => void,
+  shouldStop?: GoalStopChecker
 ): Promise<string> {
+  const result = await executeReliableSubTaskDetailed(task, goal, callLLM, executeTool, onProgress, onToolCall, shouldStop);
+  return result.summary;
+}
+
+async function executeReliableSubTaskDetailed(
+  task: SubTask,
+  goal: Goal,
+  callLLM: (prompt: string) => Promise<string>,
+  executeTool: (toolName: string, args: string) => Promise<string>,
+  onProgress?: (progress: number) => void,
+  onToolCall?: (toolName: string, target: string, result?: string, success?: boolean) => void,
+  shouldStop?: GoalStopChecker
+): Promise<TaskExecutionResult> {
   const previousResults = goal.subTasks
     .filter((t) => t.status === 'completed' && task.dependencies.includes(t.id))
     .map((t) => `[${t.description}]: ${t.result}`)
@@ -336,12 +505,15 @@ Rules:
     { role: 'system', content: systemPrompt },
     { role: 'user', content: taskPrompt },
   ];
-  const actionsTaken: Array<{ tool: string; success: boolean; target: string; content?: string; oldStr?: string; newStr?: string }> = [];
+  const actionsTaken: TaskAction[] = [];
   const recentSignatures: string[] = [];
+  const toolExecState = createToolExecState();
+  let verificationReminderCount = 0;
   const maxSteps = 30;
   let finalAssistantResponse = '';
 
   for (let step = 0; step < maxSteps; step++) {
+    checkForGoalStop(shouldStop);
     const response = await retryAsync(
       () => callLLM(JSON.stringify(conversationHistory)),
       3,
@@ -352,11 +524,17 @@ Rules:
 
     const toolCalls = parseToolCalls(response);
     if (toolCalls.length === 0) {
+      if (taskTouchesFiles(task, actionsTaken) && !hasVerificationAction(actionsTaken) && verificationReminderCount < 3) {
+        verificationReminderCount++;
+        conversationHistory.push({ role: 'user', content: 'The task changed or may have changed files, but no verification has been run yet. Run a focused verification command or read back the changed file before summarizing completion.' });
+        continue;
+      }
       onProgress?.(100);
-      return response || buildStructuredTaskReport(actionsTaken, goal, task, finalAssistantResponse);
+      return buildTaskExecutionResult(actionsTaken, goal, task, response || finalAssistantResponse);
     }
 
     for (const toolCall of toolCalls.slice(0, 1)) {
+      checkForGoalStop(shouldStop);
       let target = '';
       let parsed: any = {};
       try {
@@ -388,20 +566,26 @@ Rules:
         newStr: parsed.new_str || parsed.newStr,
       });
 
+      const processed = processToolResult(toolExecState, toolCall, toolResult);
       const feedback = success
-        ? `Tool ${toolCall.name} result:\n${toolResult}`
-        : `Tool ${toolCall.name} failed:\n${toolResult}\n\nRecover by changing strategy. Do not repeat the same call.`;
+        ? `Tool ${toolCall.name} result:\n${processed.result}`
+        : `Tool ${toolCall.name} failed:\n${processed.result}\n\nRecover by changing strategy. Do not repeat the same call.`;
       conversationHistory.push({ role: 'user', content: feedback });
       onProgress?.(Math.min(95, Math.round(((step + 1) / maxSteps) * 100)));
+
+      if (processed.shouldBreak) {
+        onProgress?.(100);
+        return buildTaskExecutionResult(actionsTaken, goal, task, finalAssistantResponse);
+      }
     }
   }
 
   onProgress?.(100);
-  return buildStructuredTaskReport(actionsTaken, goal, task, finalAssistantResponse);
+  return buildTaskExecutionResult(actionsTaken, goal, task, finalAssistantResponse);
 }
 
 function buildStructuredTaskReport(
-  actionsTaken: Array<{ tool: string; success: boolean; target: string; content?: string; oldStr?: string; newStr?: string }>,
+  actionsTaken: TaskAction[],
   goal: Goal,
   task: SubTask,
   finalAssistantResponse: string
@@ -418,11 +602,36 @@ function buildStructuredTaskReport(
     ...actionsTaken.map((action) => `- ${action.tool} ${action.success ? 'succeeded' : 'failed'}: ${action.target || '(no target)'}`),
   ];
 
+  const changedFiles = collectChangedFilesFromActions(actionsTaken);
+  if (changedFiles.length > 0) {
+    lines.push('', 'Changed files:');
+    lines.push(...changedFiles.map((filePath) => `- ${filePath}`));
+  }
+
   if (finalAssistantResponse) {
     lines.push('', 'Final assistant summary:', finalAssistantResponse);
   }
 
   return lines.join('\n');
+}
+
+function buildTaskExecutionResult(
+  actionsTaken: TaskAction[],
+  goal: Goal,
+  task: SubTask,
+  finalAssistantResponse: string
+): TaskExecutionResult {
+  const changedFiles = collectChangedFilesFromActions(actionsTaken);
+  const verificationEvidence = collectVerificationEvidence(actionsTaken);
+
+  return {
+    summary: buildStructuredTaskReport(actionsTaken, goal, task, finalAssistantResponse),
+    actionsTaken: [...actionsTaken],
+    changedFiles,
+    verified: verificationEvidence.length > 0,
+    verificationEvidence,
+    finalAssistantResponse,
+  };
 }
 
 function extractChangedFiles(result: string): string[] {
@@ -435,6 +644,14 @@ function extractChangedFiles(result: string): string[] {
   return Array.from(files);
 }
 
+function actionsTakenFromResult(result: string): TaskAction[] {
+  return extractChangedFiles(result).map((filePath) => ({
+    tool: 'write',
+    success: true,
+    target: filePath,
+  }));
+}
+
 /**
  * Goal Executor class - manages the execution of goals with multiple agents
  */
@@ -445,15 +662,18 @@ export class GoalExecutor {
   private callLLM: (prompt: string) => Promise<string>;
   private executeTool: (toolName: string, args: string) => Promise<string>;
   private maxConcurrentAgents: number;
+  private shouldStop?: GoalStopChecker;
 
   constructor(
     callLLM: (prompt: string) => Promise<string>,
     executeTool: (toolName: string, args: string) => Promise<string>,
-    maxConcurrentAgents: number = 3
+    maxConcurrentAgents: number = 3,
+    shouldStop?: GoalStopChecker
   ) {
     this.callLLM = callLLM;
     this.executeTool = executeTool;
     this.maxConcurrentAgents = maxConcurrentAgents;
+    this.shouldStop = shouldStop;
     
     // Initialize agents
     for (let i = 0; i < maxConcurrentAgents; i++) {
@@ -512,6 +732,7 @@ export class GoalExecutor {
     this.emit({ type: 'goal_created', goal });
 
     try {
+      checkForGoalStop(this.shouldStop);
       // Update status to planning
       goal.status = 'planning';
       goal.updatedAt = Date.now();
@@ -534,9 +755,11 @@ export class GoalExecutor {
       // Update status to executing
       goal.status = 'executing';
       goal.updatedAt = Date.now();
+      checkForGoalStop(this.shouldStop);
 
       // Execute sub-tasks
-      if (plan.parallelExecution) {
+      const safeParallel = plan.parallelExecution && isPlanSafeForParallel(plan);
+      if (safeParallel) {
         await this.executeSubTasksParallel(goal);
       } else {
         await this.executeSubTasksSequential(goal);
@@ -548,7 +771,6 @@ export class GoalExecutor {
         .map(t => `[${t.description}]:\n${t.result}`)
         .join('\n\n---\n\n');
 
-            goal.result = `Goal completed successfully.\n\n${results}`;
       goal.result = `Goal completed successfully.\n\n${results}`;
       goal.status = 'completed';
       goal.updatedAt = Date.now();
@@ -556,7 +778,8 @@ export class GoalExecutor {
 
       return goal;
     } catch (err: any) {
-      goal.status = 'failed';
+      const stoppedByControl = /Goal execution (paused|stopped)|request/i.test(err?.message || '');
+      goal.status = stoppedByControl ? 'pending' : 'failed';
       goal.error = err.message;
       goal.updatedAt = Date.now();
       this.emit({ type: 'goal_failed', goalId: goal.id, error: err.message });
@@ -584,6 +807,7 @@ export class GoalExecutor {
     this.emit({ type: 'goal_created', goal });
 
     try {
+      checkForGoalStop(this.shouldStop);
       if (goal.subTasks.length === 0) {
         const plan = await generateGoalPlan(goal, this.callLLM);
         this.emit({ type: 'goal_plan_created', goalId: goal.id, plan });
@@ -599,10 +823,24 @@ export class GoalExecutor {
 
       const hasIncompleteTasks = goal.subTasks.some((task) => task.status !== 'completed');
       if (hasIncompleteTasks) {
+        checkForGoalStop(this.shouldStop);
         // Check if we can run in parallel (no dependencies between incomplete tasks)
         const incompleteTasks = goal.subTasks.filter(t => t.status !== 'completed');
         const hasDependencies = incompleteTasks.some(t => t.dependencies.length > 0);
-        const canParallel = !hasDependencies && incompleteTasks.length > 1 && this.maxConcurrentAgents > 1;
+        const canParallel = !hasDependencies &&
+          incompleteTasks.length > 1 &&
+          this.maxConcurrentAgents > 1 &&
+          isPlanSafeForParallel({
+            goal: goal.description,
+            subTasks: incompleteTasks.map((task) => ({
+              id: task.id,
+              description: task.description,
+              dependencies: task.dependencies,
+              estimatedComplexity: 'medium' as const,
+            })),
+            estimatedTime: 0,
+            parallelExecution: true,
+          });
 
         if (canParallel) {
           console.log(`[GoalExecutor] Resuming with parallel execution (${incompleteTasks.length} tasks, ${this.maxConcurrentAgents} agents)`);
@@ -617,14 +855,14 @@ export class GoalExecutor {
         .map(t => `[${t.description}]:\n${t.result}`)
         .join('\n\n---\n\n');
 
-            goal.result = `Goal completed successfully.\n\n${results}`;
       goal.result = `Goal completed successfully.\n\n${results}`;
       goal.status = 'completed';
       goal.updatedAt = Date.now();
       this.emit({ type: 'goal_completed', goalId: goal.id, result: goal.result });
       return goal;
     } catch (err: any) {
-      goal.status = 'failed';
+      const stoppedByControl = /Goal execution (paused|stopped)|request/i.test(err?.message || '');
+      goal.status = stoppedByControl ? 'pending' : 'failed';
       goal.error = err.message;
       goal.updatedAt = Date.now();
       this.emit({ type: 'goal_failed', goalId: goal.id, error: err.message });
@@ -642,6 +880,7 @@ export class GoalExecutor {
     const executingTasks = new Map<string, Promise<void>>();
 
     while (completedTasks.size < goal.subTasks.length) {
+      checkForGoalStop(this.shouldStop);
       const readyTasks = goal.subTasks.filter((task) =>
         task.status === 'pending' && task.dependencies.every((dep) => completedTasks.has(dep))
       );
@@ -690,6 +929,7 @@ export class GoalExecutor {
    */
   private async executeSubTasksSequential(goal: Goal): Promise<void> {
     for (const task of goal.subTasks) {
+      checkForGoalStop(this.shouldStop);
       if (task.status === 'completed') continue;
 
       const dependenciesSatisfied = task.dependencies.every((dep) => {
@@ -743,7 +983,7 @@ export class GoalExecutor {
 
       try {
         if (!task.recentTools) task.recentTools = [];
-        const result = await executeSubTask(
+        const execution = await executeReliableSubTaskDetailed(
           task,
           goal,
           this.callLLM,
@@ -761,15 +1001,20 @@ export class GoalExecutor {
               if (task.recentTools!.length > 8) task.recentTools!.shift();
             }
             this.emit({ type: 'subtask_progress', goalId: goal.id, subtaskId: task.id, progress: task.progress || 0 });
-          }
+          },
+          this.shouldStop
         );
 
         task.description = baseDescription;
         task.status = 'completed';
-        task.result = result;
+        task.result = execution.summary;
         task.progress = 100;
-        task.filesChanged = extractChangedFiles(result);
-        this.emit({ type: 'subtask_completed', goalId: goal.id, subtaskId: task.id, result });
+        task.filesChanged = execution.changedFiles.length > 0
+          ? execution.changedFiles
+          : extractChangedFiles(execution.summary);
+        task.verified = execution.verified;
+        task.verificationEvidence = execution.verificationEvidence;
+        this.emit({ type: 'subtask_completed', goalId: goal.id, subtaskId: task.id, result: execution.summary });
         return;
       } catch (err: any) {
         lastError = err.message || String(err);
@@ -794,7 +1039,8 @@ export class GoalExecutor {
       }
     }
   }
-  /**`r`n   * Get goal by ID
+  /**
+   * Get goal by ID
    */
   getGoal(goalId: string): Goal | undefined {
     return this.goals.get(goalId);
@@ -814,3 +1060,4 @@ export class GoalExecutor {
     return Array.from(this.agents.values());
   }
 }
+

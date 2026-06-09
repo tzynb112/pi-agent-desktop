@@ -40,6 +40,12 @@ export interface ActiveGoalSnapshotState {
   savedAt?: number;
 }
 
+export interface GoalVerificationSummary {
+  totalChangedTasks: number;
+  verifiedChangedTasks: number;
+  pendingVerificationTasks: number;
+}
+
 export function createGoalStateEvent(type: GoalQueueEvent['type'], message: string, at = Date.now()): GoalQueueEvent {
   return {
     id: `goal_event_${at}_${Math.random().toString(36).slice(2, 8)}`,
@@ -62,8 +68,35 @@ export function normalizeGoalRunMeta(meta?: GoalRunMetaState): GoalRunMeta {
   };
 }
 
+export function normalizeGoalSnapshot(goal: any): any {
+  if (!goal) return goal;
+  return {
+    ...goal,
+    subTasks: Array.isArray(goal.subTasks)
+      ? goal.subTasks.map((task: any) => ({
+          ...task,
+          dependencies: Array.isArray(task.dependencies) ? [...task.dependencies] : [],
+          filesChanged: Array.isArray(task.filesChanged) ? [...task.filesChanged] : [],
+          verificationEvidence: Array.isArray(task.verificationEvidence) ? [...task.verificationEvidence] : [],
+          recentTools: Array.isArray(task.recentTools) ? [...task.recentTools] : [],
+        }))
+      : goal.subTasks,
+  };
+}
+
+export function summarizeGoalVerification(goal: any): GoalVerificationSummary {
+  const subTasks = Array.isArray(goal?.subTasks) ? goal.subTasks : [];
+  const changedTasks = subTasks.filter((task: any) => Array.isArray(task.filesChanged) && task.filesChanged.length > 0);
+  const verifiedChangedTasks = changedTasks.filter((task: any) => !!task.verified).length;
+  return {
+    totalChangedTasks: changedTasks.length,
+    verifiedChangedTasks,
+    pendingVerificationTasks: Math.max(0, changedTasks.length - verifiedChangedTasks),
+  };
+}
+
 export function normalizeGoalQueueItem(item: GoalQueueItemState): GoalQueueItem {
-  const goal = item.goal || {};
+  const goal = normalizeGoalSnapshot(item.goal || {});
   const conversationId = item.conversationId || goal.conversationId || '';
   const description = item.description || goal.description || '';
   const title = item.title || description.slice(0, 80);
@@ -80,7 +113,7 @@ export function normalizeGoalQueueItem(item: GoalQueueItemState): GoalQueueItem 
     status: item.status,
     createdAt,
     updatedAt,
-    goal: item.goal,
+    goal,
     agents: item.agents,
     meta: item.meta ? normalizeGoalRunMeta(item.meta) : undefined,
     history: item.history?.map((event) => ({
@@ -91,44 +124,45 @@ export function normalizeGoalQueueItem(item: GoalQueueItemState): GoalQueueItem 
 }
 
 export function recoverInterruptedGoalState(goal: any, now = Date.now()): any {
-  if (!goal || (goal.status !== 'planning' && goal.status !== 'executing')) {
-    return goal;
+  const normalizedGoal = normalizeGoalSnapshot(goal);
+  if (!normalizedGoal || (normalizedGoal.status !== 'planning' && normalizedGoal.status !== 'executing')) {
+    return normalizedGoal;
   }
 
   return {
-    ...goal,
+    ...normalizedGoal,
     status: 'failed',
-    error: '主进程检测到执行中断，已保存断点，可继续目标。',
+    error: 'Main process detected an interrupted execution and preserved a resume point.',
     updatedAt: now,
-    subTasks: Array.isArray(goal.subTasks)
-      ? goal.subTasks.map((task: any) =>
+    subTasks: Array.isArray(normalizedGoal.subTasks)
+      ? normalizedGoal.subTasks.map((task: any) =>
           task.status === 'executing'
             ? {
                 ...task,
                 status: 'failed',
-                error: task.error || '主进程检测到该子任务中断，可从此处继续。',
+                error: task.error || 'Main process detected this subtask was interrupted and kept a resume point.',
               }
             : task
         )
-      : goal.subTasks,
+      : normalizedGoal.subTasks,
   };
 }
 
 export function buildRecoveredGoalFromRun(run: GoalRunState, now = Date.now()): any {
-  const sourceGoal = run.goalSnapshot || {
+  const sourceGoal = normalizeGoalSnapshot(run.goalSnapshot || {
     id: run.goalId || `recovered_${run.id}`,
     description: run.description || 'Recovered interrupted goal',
     status: 'failed',
     createdAt: run.startedAt || now,
     updatedAt: now,
     subTasks: [],
-  };
+  });
   const recoveredGoal = recoverInterruptedGoalState(sourceGoal, now);
   const baseGoal = recoveredGoal === sourceGoal && recoveredGoal.status !== 'failed'
     ? {
         ...recoveredGoal,
         status: 'failed',
-        error: run.error || '主进程检测到目标运行心跳超时，已保存断点。',
+        error: run.error || 'Main process detected goal run heartbeat timeout and preserved a resume point.',
         updatedAt: now,
       }
     : recoveredGoal;
@@ -138,7 +172,7 @@ export function buildRecoveredGoalFromRun(run: GoalRunState, now = Date.now()): 
     id: baseGoal.id || run.goalId || `recovered_${run.id}`,
     description: baseGoal.description || run.description || 'Recovered interrupted goal',
     status: 'failed',
-    error: baseGoal.error || run.error || '主进程检测到目标运行心跳超时，已保存断点。',
+    error: baseGoal.error || run.error || 'Main process detected goal run heartbeat timeout and preserved a resume point.',
     updatedAt: now,
     subTasks: Array.isArray(baseGoal.subTasks) ? baseGoal.subTasks : [],
   };

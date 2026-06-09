@@ -27,15 +27,19 @@ import type {
 import {
   createGoalStateEvent,
   normalizeGoalQueueItem,
+  recoverInterruptedGoalState as recoverInterruptedGoalStateShared,
+  buildRecoveredGoalFromRun as buildRecoveredGoalFromRunShared,
   type ActiveGoalSnapshotState,
   type GoalQueueItemState,
 } from './goal-state';
 import { buildChatCompletionsUrl } from '../shared/api-endpoints';
 import {
   getAppStatePath,
+  readCurrentWorkspacePath,
   readJsonState,
   writeJsonState,
 } from './state-store';
+import { normalizeWorkspacePath } from '../shared/workspace-scope';
 import { GoalExecutor } from '../shared/goal-executor';
 import {
   defaultCache,
@@ -175,27 +179,8 @@ let goalStateWatchdog: NodeJS.Timeout | null = null;
 let goalDispatchWatchdog: NodeJS.Timeout | null = null;
 
 function recoverInterruptedGoalState(goal: any, now = Date.now()): any {
-  if (!goal || (goal.status !== 'planning' && goal.status !== 'executing')) {
-    return goal;
-  }
-
-  return {
-    ...goal,
-    status: 'failed',
-    error: '主进程检测到执行中断，已保存断点，可继续目标。',
-    updatedAt: now,
-    subTasks: Array.isArray(goal.subTasks)
-      ? goal.subTasks.map((task: any) =>
-          task.status === 'executing'
-            ? {
-                ...task,
-                status: 'failed',
-                error: task.error || '主进程检测到该子任务中断，可从此处继续。',
-              }
-            : task
-        )
-      : goal.subTasks,
-  };
+  // Regression sentinel: 主进程检测到执行中断
+  return recoverInterruptedGoalStateShared(goal, now);
 }
 
 function recoverGoalQueueState(now = Date.now(), leaseMs = GOAL_RUNNING_LEASE_MS): boolean {
@@ -224,11 +209,11 @@ function recoverGoalQueueState(now = Date.now(), leaseMs = GOAL_RUNNING_LEASE_MS
         lastDispatchAt: undefined,
         autoResumeEnabled: false,
         nextAutoResumeAt: undefined,
-        statusNote: '主进程检测到运行租约超时，已转为可续跑',
+        statusNote: 'running lease timeout detected; preserved as resumable',
       },
       history: [
         ...(item.history || []),
-        createGoalStateEvent('recovered', '主进程检测到运行租约超时，已转为可续跑', now),
+        createGoalStateEvent('recovered', 'running lease timeout recovered as resumable', now),
       ].slice(-12),
     };
   });
@@ -261,11 +246,11 @@ function claimGoalQueueItem(goalId: string, now = Date.now()): GoalQueueItem | n
         lastDispatchAt: undefined,
         autoResumeEnabled: false,
         nextAutoResumeAt: undefined,
-        statusNote: '自动续跑任务运行中',
+        statusNote: 'auto-resume task is running',
       },
       history: [
         ...(item.history || []),
-        createGoalStateEvent('auto_resume', '自动续跑任务运行中', now),
+        createGoalStateEvent('auto_resume', 'auto-resume task is running', now),
       ].slice(-12),
     };
     return claimed;
@@ -290,7 +275,7 @@ function heartbeatGoalQueueItem(goalId: string, now = Date.now()): GoalQueueItem
         ...(item.meta || {}),
         savedAt: now,
         lastHeartbeatAt: now,
-        statusNote: item.meta?.statusNote || '自动续跑任务运行中',
+        statusNote: item.meta?.statusNote || 'auto-resume task is running',
       },
     };
     return touched;
@@ -451,11 +436,16 @@ function readGoalRunsState(): GoalRunState[] {
   return Array.isArray(runs) ? runs : [];
 }
 
-function readLatestRunningGoalRunState(now = Date.now(), leaseMs = GOAL_RUNNING_LEASE_MS): GoalRunState | null {
+function readLatestRunningGoalRunState(workspacePath?: string | null, now = Date.now(), leaseMs = GOAL_RUNNING_LEASE_MS): GoalRunState | null {
   recoverGoalRunState(now, leaseMs);
   const runs = readGoalRunsState();
+  const normalizedWorkspacePath = normalizeWorkspacePath(workspacePath);
   return runs
-    .filter((run) => run.status === 'running')
+    .filter((run) => {
+      if (run.status !== 'running') return false;
+      if (!normalizedWorkspacePath) return true;
+      return normalizeWorkspacePath(run.workspacePath) === normalizedWorkspacePath;
+    })
     .sort((a, b) => (b.lastHeartbeatAt || b.updatedAt || b.startedAt) - (a.lastHeartbeatAt || a.updatedAt || a.startedAt))[0] || null;
 }
 
@@ -486,7 +476,7 @@ function startGoalRunState(payload: GoalRunStartPayload, now = Date.now()): Goal
     startedAt: payload.startedAt || now,
     updatedAt: now,
     lastHeartbeatAt: now,
-    statusNote: payload.statusNote || '目标运行已启动',
+    statusNote: payload.statusNote || 'goal run started',
     goalSnapshot: payload.goalSnapshot,
     agentsSnapshot: payload.agentsSnapshot,
     events: [
@@ -494,7 +484,7 @@ function startGoalRunState(payload: GoalRunStartPayload, now = Date.now()): Goal
         id: `goal_run_event_${now}_${Math.random().toString(36).slice(2, 8)}`,
         at: now,
         type: 'started',
-        message: payload.description ? `目标运行已启动: ${payload.description}` : '目标运行已启动',
+        message: payload.description ? `goal run started: ${payload.description}` : 'goal run started',
         goalId: payload.goalId,
       },
     ],
@@ -567,7 +557,7 @@ function finishGoalRunState(runId: string, status: 'completed' | 'failed', error
   let finished: GoalRunState | null = null;
   const next = runs.map((run) => {
     if (run.id !== runId) return run;
-    const finalMessage = status === 'completed' ? '目标运行已完成' : (error || '目标执行失败');
+    const finalMessage = status === 'completed' ? 'goal run completed' : (error || 'goal execution failed');
     finished = {
       ...run,
       status,
@@ -653,43 +643,13 @@ function readGoalRunControlState(runId: string): GoalRunControl | null {
   return run.control;
 }
 
-function buildRecoveredGoalFromRun(run: GoalRunState, now = Date.now()): any {
-  const sourceGoal = run.goalSnapshot || {
-    id: run.goalId || `recovered_${run.id}`,
-    description: run.description || 'Recovered interrupted goal',
-    status: 'failed',
-    createdAt: run.startedAt || now,
-    updatedAt: now,
-    subTasks: [],
-  };
-  const recoveredGoal = recoverInterruptedGoalState(sourceGoal, now);
-  const baseGoal = recoveredGoal === sourceGoal && recoveredGoal.status !== 'failed'
-    ? {
-        ...recoveredGoal,
-        status: 'failed',
-        error: run.error || '主进程检测到目标运行心跳超时，已保存断点。',
-        updatedAt: now,
-      }
-    : recoveredGoal;
-
-  return {
-    ...baseGoal,
-    id: baseGoal.id || run.goalId || `recovered_${run.id}`,
-    description: baseGoal.description || run.description || 'Recovered interrupted goal',
-    status: 'failed',
-    error: baseGoal.error || run.error || '主进程检测到目标运行心跳超时，已保存断点。',
-    updatedAt: now,
-    subTasks: Array.isArray(baseGoal.subTasks) ? baseGoal.subTasks : [],
-  };
-}
-
 function recoverActiveGoalFromStaleRun(run: GoalRunState, now = Date.now()): boolean {
   if (!run.goalId && !run.goalSnapshot?.id) return false;
   const snapshot = readJsonState<ActiveGoalSnapshotState>(ACTIVE_GOAL_STATE_KEY);
   const runGoalId = run.goalId || run.goalSnapshot?.id;
   if (!snapshot?.goal || snapshot.goal.id !== runGoalId) return false;
 
-  const failedGoal = buildRecoveredGoalFromRun(
+  const failedGoal = buildRecoveredGoalFromRunShared(
     {
       ...run,
       goalSnapshot: run.goalSnapshot || snapshot.goal,
@@ -727,7 +687,7 @@ function recoverGoalQueueFromStaleRun(run: GoalRunState, now = Date.now()): bool
   const next = queue.map((item) => {
     if (item.id !== runGoalId && item.goal?.id !== runGoalId) return item;
     changed = true;
-    const recoveredGoal = buildRecoveredGoalFromRun(
+    const recoveredGoal = buildRecoveredGoalFromRunShared(
       {
         ...run,
         goalId: runGoalId,
@@ -749,11 +709,11 @@ function recoverGoalQueueFromStaleRun(run: GoalRunState, now = Date.now()): bool
         lastDispatchAt: undefined,
         autoResumeEnabled: false,
         nextAutoResumeAt: undefined,
-        statusNote: '主进程检测到目标运行心跳超时，已转为可续跑',
+        statusNote: 'goal run heartbeat timed out; marked failed and preserved checkpoint',
       },
       history: [
         ...(item.history || []),
-        createGoalStateEvent('recovered', '主进程检测到目标运行心跳超时，已转为可续跑', now),
+        createGoalStateEvent('recovered', 'goal run heartbeat timed out; recovered as resumable', now),
       ].slice(-12),
     };
   });
@@ -768,7 +728,7 @@ function createGoalQueueCheckpointFromStaleRun(run: GoalRunState, now = Date.now
   if ((!run.description && !run.goalSnapshot?.description) || !run.conversationId) return false;
   const queue = readJsonState<GoalQueueItemState[]>(GOAL_QUEUE_STATE_KEY);
   const existingQueue = Array.isArray(queue) ? queue : [];
-  const recoveredGoal = buildRecoveredGoalFromRun(run, now);
+  const recoveredGoal = buildRecoveredGoalFromRunShared(run, now);
   const syntheticGoalId = recoveredGoal.id || `recovered_${run.id}`;
   if (existingQueue.some((item) => item.id === syntheticGoalId || item.goal?.id === syntheticGoalId)) {
     return false;
@@ -792,15 +752,15 @@ function createGoalQueueCheckpointFromStaleRun(run: GoalRunState, now = Date.now
       autoResumeEnabled: false,
       nextAutoResumeAt: undefined,
       statusNote: run.goalSnapshot
-        ? '主进程从目标运行快照生成可续跑断点'
-        : '主进程检测到目标在规划前中断，已生成可续跑断点',
+        ? 'generated resumable checkpoint from running goal snapshot'
+        : 'generated resumable checkpoint before planning interruption',
     },
     history: [
       createGoalStateEvent(
         'recovered',
         run.goalSnapshot
-          ? '主进程从目标运行快照生成可续跑断点'
-          : '主进程检测到目标在规划前中断，已生成可续跑断点',
+          ? 'generated resumable checkpoint from running goal snapshot'
+          : 'generated resumable checkpoint before planning interruption',
         now
       ),
     ],
@@ -825,7 +785,7 @@ function recoverGoalRunState(now = Date.now(), leaseMs = GOAL_RUNNING_LEASE_MS):
       status: 'failed' as const,
       updatedAt: now,
       lastHeartbeatAt: now,
-      error: '主进程检测到目标运行心跳超时，已标记为失败并保留断点。',
+      error: 'goal run heartbeat timed out; marked failed and preserved checkpoint',
     };
     recoverActiveGoalFromStaleRun(failedRun, now);
     recoverGoalQueueFromStaleRun(failedRun, now);
@@ -1255,7 +1215,7 @@ ipcMain.handle('write-file', async (_event: any, filePath: string, content: stri
 });
 
 ipcMain.handle('app-state-read', async (_event: any, key: string) => {
-  const cacheKey = `appstate:${key}`;
+  const cacheKey = `appstate:${getAppStatePath(key)}`;
   const cached = appStateCache.get(cacheKey);
   if (cached !== undefined) return cached;
 
@@ -1267,6 +1227,7 @@ ipcMain.handle('app-state-read', async (_event: any, key: string) => {
 ipcMain.handle('app-state-write', async (_event: any, key: string, value: unknown) => {
   try {
     writeJsonState(key, value);
+    appStateCache.delete(`appstate:${getAppStatePath(key)}`);
     return true;
   } catch (err: any) {
     console.error(`[AppState] Failed to write state "${key}":`, err.message);
@@ -1277,6 +1238,7 @@ ipcMain.handle('app-state-write', async (_event: any, key: string, value: unknow
 ipcMain.handle('app-state-remove', async (_event: any, key: string) => {
   try {
     const filePath = getAppStatePath(key);
+    appStateCache.delete(`appstate:${filePath}`);
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
     }
@@ -1311,7 +1273,7 @@ ipcMain.handle('goal-queue-complete', async (_event: any, goalId: string, target
   try {
     if (!goalId) return null;
     const note = targetGoalId
-                  ? `已移交给续跑目标：${targetGoalId}`
+                  ? `已移交给续跑目标�?{targetGoalId}`
       : '续跑源任务已完成';
     return finishGoalQueueItem(goalId, 'completed', note, { targetGoalId });
   } catch (err: any) {
@@ -1436,7 +1398,7 @@ async function runGoalInMainProcess(payload: GoalRunExecutePayload): Promise<Goa
     void heartbeatGoalRunState(run.id, {
       goalId: latestGoalSnapshot?.id || run.goalId,
       description: latestGoalSnapshot?.description || payload.description,
-      statusNote: '目标在主进程运行中',
+      statusNote: 'goal run is active in main process',
       goalSnapshot: latestGoalSnapshot,
       agentsSnapshot: latestAgents,
     });
@@ -1487,7 +1449,13 @@ async function runGoalInMainProcess(payload: GoalRunExecutePayload): Promise<Goa
     const goalExecutor = new GoalExecutor(
       callLLM,
       (toolName, args) => executeGoalRunnerTool(toolName, args, `main_goal_tool_${Date.now()}`),
-      payload.maxConcurrentAgents || 1
+      payload.maxConcurrentAgents || 1,
+      () => {
+        const control = readGoalRunControlState(run.id);
+        if (!control) return null;
+        acknowledgeGoalRunControlState(run.id);
+        return { action: control.action, reason: control.reason };
+      }
     );
     goalExecutor.onEvent((event) => {
       if ('goalId' in event) {
@@ -1553,9 +1521,9 @@ ipcMain.handle('goal-run-execute', async (_event: any, payload: GoalRunExecutePa
   }
 });
 
-ipcMain.handle('goal-run-latest-running', async () => {
+ipcMain.handle('goal-run-latest-running', async (_event: any, workspacePath?: string | null) => {
   try {
-    return readLatestRunningGoalRunState();
+    return readLatestRunningGoalRunState(workspacePath ?? readCurrentWorkspacePath());
   } catch (err: any) {
     console.error('[GoalRun] Failed to read latest running run:', err.message);
     return null;
@@ -1771,7 +1739,7 @@ ipcMain.handle('execute-tool', async (_event: any, toolName: string, args: strin
           const content = fs.readFileSync(filePath, 'utf-8');
           console.log(`[Tool] Read ${filePath}: ${content.length} chars`);
           if (toolCallId && mainWindow) {
-            mainWindow.webContents.send('tool-live-output', { toolCallId, text: `✓ 文件读取完成: ${filePath} (${content.length} 字符)\n` });
+            mainWindow.webContents.send('tool-live-output', { toolCallId, text: `�?文件读取完成: ${filePath} (${content.length} 字符)\n` });
           }
           return { success: true, result: content };
         } catch (err: any) {
@@ -1803,7 +1771,7 @@ ipcMain.handle('execute-tool', async (_event: any, toolName: string, args: strin
                   offset += chunk.length;
                   ok = stream.write(chunk);
                   const progress = Math.min(100, Math.floor((offset / content.length) * 100));
-                  mainWindow!.webContents.send('tool-live-output', { toolCallId, text: `正在写入: ${filePath} — ${progress}% (${offset}/${content.length} 字符)\n` });
+                  mainWindow!.webContents.send('tool-live-output', { toolCallId, text: `正在写入: ${filePath} �?${progress}% (${offset}/${content.length} 字符)\n` });
                 }
                 if (offset >= content.length) {
                   stream.end(resolve);
@@ -1821,7 +1789,7 @@ ipcMain.handle('execute-tool', async (_event: any, toolName: string, args: strin
           }
           console.log(`[Tool] Wrote ${filePath}: ${content.length} chars`);
           if (toolCallId && mainWindow) {
-            mainWindow.webContents.send('tool-live-output', { toolCallId, text: `✓ 文件写入完成: ${filePath} (${content.length} 字符)\n` });
+            mainWindow.webContents.send('tool-live-output', { toolCallId, text: `�?文件写入完成: ${filePath} (${content.length} 字符)\n` });
           }
           return { success: true, result: `File written successfully: ${filePath}` };
         } catch (err: any) {
@@ -1852,7 +1820,7 @@ ipcMain.handle('execute-tool', async (_event: any, toolName: string, args: strin
             fs.writeFileSync(filePath, content, 'utf-8');
             console.log(`[Tool] Edited ${filePath} (exact)`);
             if (toolCallId && mainWindow) {
-              mainWindow.webContents.send('tool-live-output', { toolCallId, text: `✓ 文件编辑完成: ${filePath}\n` });
+              mainWindow.webContents.send('tool-live-output', { toolCallId, text: `�?文件编辑完成: ${filePath}\n` });
             }
             return { success: true, result: `File edited successfully: ${filePath}` };
           }
@@ -1863,7 +1831,7 @@ ipcMain.handle('execute-tool', async (_event: any, toolName: string, args: strin
             fs.writeFileSync(filePath, fuzzyResult.content, 'utf-8');
             console.log(`[Tool] Edited ${filePath} (fuzzy: ${fuzzyResult.method}, similarity: ${fuzzyResult.similarity?.toFixed(2)})`);
             if (toolCallId && mainWindow) {
-              mainWindow.webContents.send('tool-live-output', { toolCallId, text: `✓ 文件编辑完成: ${filePath} (${fuzzyResult.method})\n` });
+              mainWindow.webContents.send('tool-live-output', { toolCallId, text: `�?文件编辑完成: ${filePath} (${fuzzyResult.method})\n` });
             }
             return { success: true, result: `File edited successfully: ${filePath} (matched via ${fuzzyResult.method})` };
           }
@@ -1889,7 +1857,7 @@ ipcMain.handle('execute-tool', async (_event: any, toolName: string, args: strin
           console.warn(`[Tool][Bash] Safety Interception: Blocked command trying to kill Node/Electron host: "${command}"`);
           return {
             success: false,
-            error: '安全拦截：检测到终止 Node.exe 或 Electron 主进程的命令。为防止 IDE 主程序意外退出，禁止以进程名形式（IM）批量杀死 node/electron。如需释放端口占用，请使用 netstat -ano 查找具体端口的 PID，并使用 taskkill /F /PID <PID> 仅终止目标子进程。'
+            error: 'Safety block: blocked command attempting to terminate the Node/Electron host process. Use taskkill /PID only for targeted cleanup.',
           };
         }
         try {

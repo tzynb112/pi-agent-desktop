@@ -228,7 +228,7 @@ export interface ElectronAPI {
   failGoalQueueItem?: (goalId: string, note?: string) => Promise<GoalQueueItem | null>;
   startGoalRun?: (payload: GoalRunStartPayload) => Promise<GoalRunState | null>;
   executeGoalRun?: (payload: GoalRunExecutePayload) => Promise<GoalRunExecuteResult | null>;
-  readLatestRunningGoalRun?: () => Promise<GoalRunState | null>;
+  readLatestRunningGoalRun?: (workspacePath?: string | null) => Promise<GoalRunState | null>;
   heartbeatGoalRun?: (runId: string, patch?: GoalRunStatePatch) => Promise<GoalRunState | null>;
   appendGoalRunEvent?: (runId: string, event: GoalRunEventPatch) => Promise<GoalRunState | null>;
   completeGoalRun?: (runId: string) => Promise<GoalRunState | null>;

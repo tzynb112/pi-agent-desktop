@@ -1,16 +1,44 @@
 import { app } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
+import {
+  ACTIVE_WORKSPACE_APP_STATE_KEY,
+  buildWorkspaceScopedKey,
+  isWorkspaceScopedKey,
+  normalizeWorkspacePath,
+} from '../shared/workspace-scope';
 
 const APP_STATE_DIR = 'piano-state';
 const APP_STATE_KEY_RE = /^[a-z0-9_.-]+$/i;
 
-export function getAppStatePath(key: string): string {
+function getGlobalAppStatePath(key: string): string {
   if (!APP_STATE_KEY_RE.test(key)) {
     throw new Error(`Invalid app state key: ${key}`);
   }
 
   return path.join(app.getPath('userData'), APP_STATE_DIR, `${key}.json`);
+}
+
+export function readCurrentWorkspacePath(): string | null {
+  const filePath = getGlobalAppStatePath(ACTIVE_WORKSPACE_APP_STATE_KEY);
+  if (!fs.existsSync(filePath)) return null;
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as unknown;
+    return typeof parsed === 'string' ? normalizeWorkspacePath(parsed) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function getAppStatePath(key: string, workspacePath?: string | null): string {
+  if (key === ACTIVE_WORKSPACE_APP_STATE_KEY || isWorkspaceScopedKey(key)) {
+    return getGlobalAppStatePath(key);
+  }
+
+  const resolvedWorkspacePath = workspacePath ?? readCurrentWorkspacePath();
+  const scopedKey = buildWorkspaceScopedKey(key, resolvedWorkspacePath);
+  return path.join(app.getPath('userData'), APP_STATE_DIR, `${scopedKey}.json`);
 }
 
 export function writeJsonFileAtomic(filePath: string, value: unknown): void {
@@ -21,8 +49,8 @@ export function writeJsonFileAtomic(filePath: string, value: unknown): void {
   fs.renameSync(tempPath, filePath);
 }
 
-export function readJsonState<T>(key: string): T | null {
-  const filePath = getAppStatePath(key);
+export function readJsonState<T>(key: string, workspacePath?: string | null): T | null {
+  const filePath = getAppStatePath(key, workspacePath);
   if (!fs.existsSync(filePath)) return null;
 
   try {
@@ -38,6 +66,6 @@ export function readJsonState<T>(key: string): T | null {
   }
 }
 
-export function writeJsonState(key: string, value: unknown): void {
-  writeJsonFileAtomic(getAppStatePath(key), value);
+export function writeJsonState(key: string, value: unknown, workspacePath?: string | null): void {
+  writeJsonFileAtomic(getAppStatePath(key, workspacePath), value);
 }

@@ -1,5 +1,6 @@
 import type { GoalQueueEvent, GoalQueueItem, GoalRunMeta } from '../types';
 import type { Agent, Goal } from '../../shared/goal-executor';
+import { normalizeGoalSnapshot, summarizeGoalVerification } from '../../main/goal-state';
 
 export const GOAL_RUNNING_LEASE_MS = 90_000;
 
@@ -48,21 +49,22 @@ export function mergeGoalQueueHistory(existing: GoalQueueEvent[] = [], event?: G
 }
 
 export function recoverInterruptedGoal(goal: Goal, now = Date.now()): Goal {
-  if (goal.status !== 'planning' && goal.status !== 'executing') {
-    return goal;
+  const normalizedGoal = normalizeGoalSnapshot(goal);
+  if (normalizedGoal.status !== 'planning' && normalizedGoal.status !== 'executing') {
+    return normalizedGoal;
   }
 
   return {
-    ...goal,
+    ...normalizedGoal,
     status: 'failed',
-    error: '应用重启后检测到上次执行中断，已保存断点，可继续目标。',
+    error: 'Application restart detected an interrupted run and preserved a resume point.',
     updatedAt: now,
-    subTasks: (goal.subTasks || []).map((task) =>
+    subTasks: (normalizedGoal.subTasks || []).map((task: Goal['subTasks'][number]) =>
       task.status === 'executing'
         ? {
             ...task,
             status: 'failed',
-            error: task.error || '应用重启导致该子任务中断，可从此处继续。',
+            error: task.error || 'Application restart interrupted this subtask; it can be resumed from here.',
           }
         : task
     ),
@@ -76,6 +78,7 @@ export function recoverInterruptedGoalQueue(queue: GoalQueueItem[], now = Date.n
 
     changed = true;
     const recoveredGoal = item.goal ? recoverInterruptedGoal(item.goal as Goal, now) : item.goal;
+    const verification = summarizeGoalVerification(recoveredGoal);
     return {
       ...item,
       status: 'failed' as const,
@@ -88,18 +91,21 @@ export function recoverInterruptedGoalQueue(queue: GoalQueueItem[], now = Date.n
         failureCount: (item.meta?.failureCount || 0) + 1,
         autoResumeEnabled: false,
         nextAutoResumeAt: undefined,
-        statusNote: '检测到上次运行中断，已转为可续跑',
+        statusNote: item.meta?.statusNote || (
+          verification.totalChangedTasks > 0
+            ? `verified ${verification.verifiedChangedTasks}/${verification.totalChangedTasks} changed subtasks`
+            : 'restored interrupted goal queue item'
+        ),
       } as GoalRunMeta,
       history: mergeGoalQueueHistory(
         item.history,
-        createGoalQueueEvent('recovered', '应用启动时恢复了中断的运行任务', now)
+        createGoalQueueEvent('recovered', 'Application start recovered an interrupted queue item', now)
       ),
     };
   });
 
   return { queue: next, changed };
 }
-
 export function updateGoalQueueItemInQueue(
   queue: GoalQueueItem[],
   goalId: string,

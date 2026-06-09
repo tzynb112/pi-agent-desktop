@@ -23,11 +23,13 @@ import { buildSystemPrompt as buildSystemPromptFromConfig } from './config/syste
 
 import { compactConversation } from './utils/compactor';
 import { buildChatCompletionsUrl } from '../shared/api-endpoints';
+import { normalizeWorkspacePath } from '../shared/workspace-scope';
 
 import { sanitizeAssistantDisplayContent, sanitizeChatMessage} from './utils/message-sanitize';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useUIState } from './hooks/useUIState';
 import { useConversations } from './hooks/useConversations';
+import { getWorkspacePath as getActiveWorkspacePath, setWorkspacePath } from './utils/workspace-context';
 import { isRetryableStatus, getRetryDelay, getRetryReason } from './utils/streaming';
 import type { StreamedChatCompletion, ToolCallPart } from './utils/streaming';
 import { parseXmlToolCalls, shouldAllowToolCallsForUserInput } from './utils/tool-execution';
@@ -41,6 +43,10 @@ import { tryParseJson } from './utils/json-heal';
 import { findDangerousCommandMatch } from './utils/bash-safety';
 import type { Goal, Agent } from '../shared/goal-executor';
 import {
+  normalizeGoalSnapshot,
+  summarizeGoalVerification,
+} from '../main/goal-state';
+import {
   GOAL_RUNNING_LEASE_MS,
   buildResumeSourceFromGoal as buildResumeSourceFromGoalInQueue,
   clampAutoResumeDelaySeconds,
@@ -50,7 +56,6 @@ import {
   markResumeSourceTransferredInQueue,
   mergeGoalQueueHistory,
   planGoalQueueAutoResume,
-  recoverInterruptedGoal,
   recoverInterruptedGoalQueue as recoverInterruptedGoalQueueInMemory,
   recoverStaleRunningGoalQueue as recoverStaleRunningGoalQueueInMemory,
   transitionGoalQueueItemInQueue,
@@ -59,7 +64,7 @@ import {
 } from './utils/goal-queue';
 
 import {
-  ACTIVE_GOAL_STORAGE_KEY, GOAL_QUEUE_STORAGE_KEY, ACTIVE_GOAL_APP_STATE_KEY, GOAL_QUEUE_APP_STATE_KEY,
+  getActiveGoalStorageKey, getGoalQueueStorageKey, getActiveGoalAppStateKey, getGoalQueueAppStateKey,
   type ActiveGoalSnapshot, type ResumeSource,
   goalQueueStatusLabel, recoverInterruptedGoalQueue, persistAppState, removeAppState,
   clearActiveGoalSnapshot, clearTriggeredAutoResumeGoal, getGoalQueueFreshness, getActiveGoalSnapshotFreshness,
@@ -80,7 +85,8 @@ function saveActiveGoalSnapshot(
   previousMeta?: GoalRunMeta,
   patchMeta: Partial<GoalRunMeta> = {},
   queueStatusOverride?: GoalQueueItem['status'],
-  queueEvent?: GoalQueueEvent
+  queueEvent?: GoalQueueEvent,
+  workspacePath?: string | null
 ): ActiveGoalSnapshot | null {
   if (!conversationId || !goal || goal.status === 'completed') {
     if (conversationId && goal) {
@@ -89,36 +95,42 @@ function saveActiveGoalSnapshot(
         savedAt: now,
         lastHeartbeatAt: now,
         failureCount: previousMeta?.failureCount || 0,
-        statusNote: patchMeta.statusNote || '目标完成',
-      }, queueStatusOverride, queueEvent || createGoalQueueEvent('completed', patchMeta.statusNote || '目标完成'));
+        statusNote: patchMeta.statusNote || 'goal completed',
+      }, queueStatusOverride, queueEvent || createGoalQueueEvent('completed', patchMeta.statusNote || 'goal completed'), workspacePath);
     }
-    clearActiveGoalSnapshot();
-    removeAppState(ACTIVE_GOAL_APP_STATE_KEY);
+    clearActiveGoalSnapshot(workspacePath);
+    removeAppState(getActiveGoalAppStateKey(workspacePath));
     return null;
   }
 
   const now = Date.now();
+  const normalizedGoal = normalizeGoalSnapshot(goal);
+  const verification = summarizeGoalVerification(normalizedGoal);
   const failureCount = patchMeta.failureCount
     ?? previousMeta?.failureCount
-    ?? (goal.status === 'failed' ? 1 : 0);
+    ?? (normalizedGoal.status === 'failed' ? 1 : 0);
   const meta: GoalRunMeta = {
     savedAt: now,
     lastHeartbeatAt: now,
     failureCount,
     nextAutoResumeAt: patchMeta.nextAutoResumeAt ?? previousMeta?.nextAutoResumeAt,
     autoResumeEnabled: patchMeta.autoResumeEnabled ?? previousMeta?.autoResumeEnabled,
-    statusNote: patchMeta.statusNote ?? previousMeta?.statusNote,
+    statusNote: patchMeta.statusNote ?? previousMeta?.statusNote ?? (
+      verification.totalChangedTasks > 0
+        ? `verified ${verification.verifiedChangedTasks}/${verification.totalChangedTasks} changed subtasks`
+        : undefined
+    ),
   };
 
   const snapshot: ActiveGoalSnapshot = {
     conversationId,
-    goal,
+    goal: normalizedGoal,
     agents,
     meta,
   };
-  safeStorage.setItem(ACTIVE_GOAL_STORAGE_KEY, JSON.stringify(snapshot));
-  persistAppState(ACTIVE_GOAL_APP_STATE_KEY, snapshot);
-  const status = queueStatusOverride || goalStatusToQueueStatus(goal.status);
+  safeStorage.setItem(getActiveGoalStorageKey(workspacePath), JSON.stringify(snapshot));
+  persistAppState(getActiveGoalAppStateKey(workspacePath), snapshot);
+  const status = queueStatusOverride || goalStatusToQueueStatus(normalizedGoal.status);
   const derivedEvent =
     queueEvent ||
     createGoalQueueEvent(
@@ -126,23 +138,22 @@ function saveActiveGoalSnapshot(
         ? 'failed'
         : patchMeta.nextAutoResumeAt
           ? 'scheduled'
-          : patchMeta.statusNote?.includes('继续')
+          : patchMeta.statusNote?.includes('continue')
             ? 'manual_continue'
             : 'heartbeat',
-      patchMeta.statusNote || goal.description.slice(0, 60)
+      patchMeta.statusNote || normalizedGoal.description.slice(0, 60)
     );
-  upsertGoalQueueItem(conversationId, goal, agents, meta, queueStatusOverride, derivedEvent);
+  upsertGoalQueueItem(conversationId, normalizedGoal, agents, meta, queueStatusOverride, derivedEvent, workspacePath);
   return snapshot;
 }
-
-function loadActiveGoalSnapshot(): ActiveGoalSnapshot | null {
+function loadActiveGoalSnapshot(workspacePath?: string | null): ActiveGoalSnapshot | null {
   try {
-    const raw = safeStorage.getItem(ACTIVE_GOAL_STORAGE_KEY);
+    const raw = safeStorage.getItem(getActiveGoalStorageKey(workspacePath));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as ActiveGoalSnapshot;
     return normalizeActiveGoalSnapshot(parsed);
   } catch {
-    clearActiveGoalSnapshot();
+    clearActiveGoalSnapshot(workspacePath);
     return null;
   }
 }
@@ -150,11 +161,12 @@ function loadActiveGoalSnapshot(): ActiveGoalSnapshot | null {
 function normalizeActiveGoalSnapshot(parsed: ActiveGoalSnapshot | null): ActiveGoalSnapshot | null {
   if (!parsed?.conversationId || !parsed?.goal) return null;
   const legacySavedAt = parsed.savedAt || parsed.goal.updatedAt || Date.now();
-  const recoveredGoal = recoverInterruptedGoal(parsed.goal);
-  const wasInterrupted = recoveredGoal !== parsed.goal;
+  const normalizedGoal = normalizeGoalSnapshot(parsed.goal);
+  const wasInterrupted = normalizedGoal !== parsed.goal;
+  const verification = summarizeGoalVerification(normalizedGoal);
   return {
     ...parsed,
-    goal: recoveredGoal,
+    goal: normalizedGoal,
     meta: {
       savedAt: wasInterrupted ? Date.now() : (parsed.meta?.savedAt ?? legacySavedAt),
       lastHeartbeatAt: wasInterrupted ? Date.now() : (parsed.meta?.lastHeartbeatAt ?? legacySavedAt),
@@ -163,12 +175,17 @@ function normalizeActiveGoalSnapshot(parsed: ActiveGoalSnapshot | null): ActiveG
         : (parsed.meta?.failureCount ?? (parsed.goal.status === 'failed' ? 1 : 0)),
       nextAutoResumeAt: wasInterrupted ? undefined : parsed.meta?.nextAutoResumeAt,
       autoResumeEnabled: wasInterrupted ? false : parsed.meta?.autoResumeEnabled,
-      statusNote: wasInterrupted ? '检测到上次运行中断，已保存断点' : parsed.meta?.statusNote,
+      statusNote: wasInterrupted
+        ? 'restored from interrupted snapshot'
+        : (parsed.meta?.statusNote || (
+            verification.totalChangedTasks > 0
+              ? `verified ${verification.verifiedChangedTasks}/${verification.totalChangedTasks} changed subtasks`
+              : undefined
+          )),
     },
   };
 }
-
-function buildResumeGoalPrompt(goal: Goal): string {
+function buildResumeGoalPrompt(goal: Goal, workspaceName?: string): string {
   const completed = goal.subTasks
     .filter((task) => task.status === 'completed')
     .map((task, index) => `${index + 1}. ${task.description}\n结果: ${task.result || '已完成'}`)
@@ -182,6 +199,7 @@ function buildResumeGoalPrompt(goal: Goal): string {
   return [
     '/goal 继续执行这个未完成目标。',
     '',
+    workspaceName ? `当前工作区: ${workspaceName}` : '当前工作区: 未命名',
     `原始目标: ${goal.description}`,
     completed ? `已完成的部分:\n${completed}` : '已完成的部分: 暂无',
     remaining ? `待继续的部分:\n${remaining}` : '待继续的部分: 请验证整体结果并收尾',
@@ -202,11 +220,21 @@ const TOKEN_COMPLETION_MULTIPLIER = 1.3;
 const MAX_TITLE_LENGTH = 40;
 
 const App: React.FC = () => {
-  const { conversations, setConversations, activeConversationId, setActiveConversationId, conversationsRef, saveConversations, getActiveBranchMessages, updateConversation } = useConversations();
-
-
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [rootPath, setRootPath] = useState<string | null>(null);
+  const [rootPath, setRootPath] = useState<string | null>(() => getActiveWorkspacePath());
+  useEffect(() => {
+    setWorkspacePath(rootPath);
+  }, [rootPath]);
+  const normalizedRootPath = normalizeWorkspacePath(rootPath);
+  const workspaceName = normalizedRootPath ? (normalizedRootPath.split('/').pop() || undefined) : undefined;
+  const activeGoalStorageKey = getActiveGoalStorageKey(rootPath);
+  const goalQueueStorageKey = getGoalQueueStorageKey(rootPath);
+  const activeGoalAppStateKey = getActiveGoalAppStateKey(rootPath);
+  const goalQueueAppStateKey = getGoalQueueAppStateKey(rootPath);
+  const ACTIVE_GOAL_STORAGE_KEY = activeGoalStorageKey;
+  const GOAL_QUEUE_STORAGE_KEY = goalQueueStorageKey;
+  const ACTIVE_GOAL_APP_STATE_KEY = activeGoalAppStateKey;
+  const GOAL_QUEUE_APP_STATE_KEY = goalQueueAppStateKey;
+  const { conversations, setConversations, activeConversationId, setActiveConversationId, conversationsRef, saveConversations, getActiveBranchMessages, updateConversation } = useConversations(rootPath);
   const {
     sidebarCollapsed, setSidebarCollapsed,
     fileTreeCollapsed, setFileTreeCollapsed,
@@ -220,7 +248,8 @@ const App: React.FC = () => {
     isResizingRef,
     isSidebarResizingRef,
     isFileViewerResizingRef,
-  } = useUIState();
+  } = useUIState(rootPath);
+  const [isStreaming, setIsStreaming] = useState(false);
   const [safetyConfirm, setSafetyConfirm] = useState<{
     isOpen: boolean;
     cmd: string;
@@ -301,14 +330,15 @@ const App: React.FC = () => {
   const [currentGoalConversationId, setCurrentGoalConversationId] = useState<string | null>(null);
   const [goalAgents, setGoalAgents] = useState<Agent[]>([]);
   const [goalRunMeta, setGoalRunMeta] = useState<GoalRunMeta | null>(null);
-  const [goalQueue, setGoalQueue] = useState<GoalQueueItem[]>(() => loadGoalQueue(true));
+  const [goalQueue, setGoalQueue] = useState<GoalQueueItem[]>(() => loadGoalQueue(true, rootPath));
 
   const clearGoalState = useCallback(() => {
     setCurrentGoal(null);
     setCurrentGoalConversationId(null);
     setGoalAgents([]);
     setGoalRunMeta(null);
-  }, []);  const [draftPrompt, setDraftPrompt] = useState<{ id: number; text: string } | null>(null);
+  }, []);
+  const [draftPrompt, setDraftPrompt] = useState<{ id: number; text: string } | null>(null);
 
   // Execution panel visibility states
   const [executionPanelDismissed, setExecutionPanelDismissed] = useState(false);
@@ -380,11 +410,10 @@ const App: React.FC = () => {
   }, []);
   const mergeQueueHeartbeatItem = useCallback((heartbeatItem: GoalQueueItem | null) => {
     if (!heartbeatItem) return;
-    const nextQueue = loadGoalQueue().map((item) => item.id === heartbeatItem.id ? heartbeatItem : item).slice(0, 20);
-    safeStorage.setItem(GOAL_QUEUE_STORAGE_KEY, JSON.stringify(nextQueue));
-    persistAppState(GOAL_QUEUE_APP_STATE_KEY, nextQueue);
+    const nextQueue = loadGoalQueue(false, rootPath).map((item) => item.id === heartbeatItem.id ? heartbeatItem : item).slice(0, 20);
+    saveGoalQueue(nextQueue, rootPath);
     setGoalQueue(nextQueue);
-  }, []);
+  }, [rootPath, saveGoalQueue]);
   const startQueueHeartbeat = useCallback((goalId: string) => {
     stopQueueHeartbeat();
     if (!window.electronAPI?.heartbeatGoalQueueItem) return;
@@ -408,6 +437,21 @@ const App: React.FC = () => {
     }
   }, []);
 
+  useEffect(() => {
+    stopQueueHeartbeat();
+    stopGoalRunHeartbeat();
+    queueSchedulerTriggeredRef.current = null;
+    autoResumeTriggeredGoalIdRef.current = null;
+    activeGoalRunIdRef.current = null;
+    activeGoalProgressMsgIdRef.current = null;
+    pendingResumeSourceRef.current = null;
+    linkedResumeGoalIdsRef.current.clear();
+    clearTriggeredAutoResumeGoal(autoResumeTriggeredGoalIdRef);
+    clearGoalState();
+    setDraftPrompt(null);
+    setGoalQueue(loadGoalQueue(true, rootPath));
+  }, [clearGoalState, rootPath, stopGoalRunHeartbeat, stopQueueHeartbeat]);
+
 
   useEffect(() => {
     return () => {
@@ -417,12 +461,12 @@ const App: React.FC = () => {
   }, [stopGoalRunHeartbeat, stopQueueHeartbeat]);
 
   useEffect(() => {
-    const snapshot = loadActiveGoalSnapshot();
+    const snapshot = loadActiveGoalSnapshot(rootPath);
     if (!snapshot) return;
 
     const conversationExists = conversationsRef.current.some((c) => c.id === snapshot.conversationId);
     if (!conversationExists || snapshot.goal.status === 'completed') {
-      clearActiveGoalSnapshot();
+      clearActiveGoalSnapshot(rootPath);
       return;
     }
 
@@ -443,10 +487,11 @@ const App: React.FC = () => {
         undefined,
         snapshot.goal.status === 'failed'
           ? createGoalQueueEvent('recovered', '启动时恢复了中断目标，可继续执行')
-          : createGoalQueueEvent('heartbeat', snapshot.meta.statusNote || '已恢复活动目标')
+          : createGoalQueueEvent('heartbeat', snapshot.meta.statusNote || '已恢复活动目标'),
+        rootPath
       )
     );
-  }, []);
+  }, [activeConversationId, conversationsRef, rootPath, setActiveConversationId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -454,23 +499,22 @@ const App: React.FC = () => {
     const hydratePersistentGoalState = async () => {
       const fileQueue = await window.electronAPI?.readAppState?.<GoalQueueItem[]>(GOAL_QUEUE_APP_STATE_KEY);
       const fileSnapshotRaw = await window.electronAPI?.readAppState?.<ActiveGoalSnapshot>(ACTIVE_GOAL_APP_STATE_KEY);
-      const runningRun = await window.electronAPI?.readLatestRunningGoalRun?.();
+      const runningRun = await window.electronAPI?.readLatestRunningGoalRun?.(rootPath);
       if (cancelled) return;
 
-      if (Array.isArray(fileQueue) && getGoalQueueFreshness(fileQueue) > getGoalQueueFreshness(loadGoalQueue())) {
+      if (Array.isArray(fileQueue) && getGoalQueueFreshness(fileQueue) > getGoalQueueFreshness(loadGoalQueue(false, rootPath))) {
         const recovery = recoverInterruptedGoalQueueInMemory(fileQueue);
         const recoveredQueue = recovery.queue.slice(0, 20);
-        safeStorage.setItem(GOAL_QUEUE_STORAGE_KEY, JSON.stringify(recoveredQueue));
-        persistAppState(GOAL_QUEUE_APP_STATE_KEY, recoveredQueue);
+        saveGoalQueue(recoveredQueue, rootPath);
         setGoalQueue(recoveredQueue);
       }
 
       if (runningRun?.goalSnapshot && runningRun.conversationId) {
-        const recoveredGoal = recoverInterruptedGoal(runningRun.goalSnapshot as Goal);
+        const recoveredGoal = normalizeGoalSnapshot(runningRun.goalSnapshot as Goal);
         const failedGoal: Goal = {
           ...recoveredGoal,
           status: 'failed',
-          error: recoveredGoal.error || 'Renderer 重启后从主进程运行快照恢复，已保存断点。',
+          error: recoveredGoal.error || 'Renderer restored the interrupted run snapshot.',
           updatedAt: Date.now(),
         };
         const recoveredMeta: GoalRunMeta = {
@@ -478,7 +522,7 @@ const App: React.FC = () => {
           lastHeartbeatAt: Date.now(),
           failureCount: 1,
           autoResumeEnabled: false,
-          statusNote: 'Renderer 重启后从主进程运行快照恢复断点',
+          statusNote: 'Renderer restored interrupted run snapshot',
         };
         const snapshot: ActiveGoalSnapshot = {
           conversationId: runningRun.conversationId,
@@ -501,23 +545,25 @@ const App: React.FC = () => {
             runningRun.agentsSnapshot || [],
             recoveredMeta,
             undefined,
-            createGoalQueueEvent('recovered', 'Renderer 重启后从主进程运行快照恢复断点')
+            createGoalQueueEvent('recovered', 'Renderer restored interrupted run snapshot'),
+            rootPath
           )
         );
-        await window.electronAPI?.failGoalRun?.(runningRun.id, 'Renderer 重启后已恢复为可续跑断点');
+        await window.electronAPI?.failGoalRun?.(runningRun.id, 'Renderer restored interrupted run snapshot');
         return;
       }
+
 
       const fileSnapshot = normalizeActiveGoalSnapshot(fileSnapshotRaw || null);
       if (!fileSnapshot) return;
 
-      if (getActiveGoalSnapshotFreshness(fileSnapshot) <= getActiveGoalSnapshotFreshness(loadActiveGoalSnapshot())) {
+      if (getActiveGoalSnapshotFreshness(fileSnapshot) <= getActiveGoalSnapshotFreshness(loadActiveGoalSnapshot(rootPath))) {
         return;
       }
 
       const conversationExists = conversationsRef.current.some((c) => c.id === fileSnapshot.conversationId);
       if (!conversationExists || fileSnapshot.goal.status === 'completed') {
-        clearActiveGoalSnapshot();
+        clearActiveGoalSnapshot(rootPath);
         return;
       }
 
@@ -534,8 +580,9 @@ const App: React.FC = () => {
           fileSnapshot.meta,
           undefined,
           fileSnapshot.goal.status === 'failed'
-            ? createGoalQueueEvent('recovered', '已从主进程状态恢复中断目标')
-            : createGoalQueueEvent('heartbeat', fileSnapshot.meta.statusNote || '已从主进程状态恢复活动目标')
+            ? createGoalQueueEvent('recovered', 'renderer recovered interrupted goal from file snapshot')
+            : createGoalQueueEvent('heartbeat', fileSnapshot.meta.statusNote || 'renderer recovered active goal state'),
+          rootPath
         )
       );
     };
@@ -544,7 +591,7 @@ const App: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [rootPath, activeConversationId, conversationsRef, setActiveConversationId]);
 
   useEffect(() => {
     // Sanitize any active streaming state on mount to prevent ghost spinners after reloads or HMR
@@ -934,13 +981,14 @@ const App: React.FC = () => {
     const alwaysAvailableTools = ['web', 'config', 'createTool', 'deleteTool', 'listTools', 'executeCustomTool'];
     return buildSystemPromptFromConfig({
       agentName: apiSettings.agentName || 'PianoAgent',
+      workspaceName,
       selectedTools: Array.from(new Set([...enabledBuiltInTools, ...alwaysAvailableTools])),
       customSystemPrompt: mergedCustom || undefined,
       skills: apiSettings.skills ?? [],
       projectContextFiles,
       cwd: rootPath || undefined,
     });
-  }, [apiSettings.skills, apiSettings.customSystemPrompt, apiSettings.agentName, apiSettings.enabledTools, projectContextFiles, pianoConfigPrompt, rootPath]);
+  }, [apiSettings.skills, apiSettings.customSystemPrompt, apiSettings.agentName, apiSettings.enabledTools, projectContextFiles, pianoConfigPrompt, rootPath, workspaceName]);
 
 
   const handleSwitchBranch = useCallback((msgId: string) => {
@@ -1001,68 +1049,68 @@ const App: React.FC = () => {
       if (activeConversationId === id) {
         setActiveConversationId(updated.length > 0 ? updated[0].id : null);
       }
-      const snapshot = loadActiveGoalSnapshot();
+      const snapshot = loadActiveGoalSnapshot(rootPath);
       if (snapshot?.conversationId === id || currentGoalConversationId === id) {
         clearTriggeredAutoResumeGoal(autoResumeTriggeredGoalIdRef, snapshot?.goal?.id || currentGoal?.id);
-        clearActiveGoalSnapshot();
+        clearActiveGoalSnapshot(rootPath);
         clearGoalState();
       }
-      setGoalQueue(removeGoalQueueItemsForConversation(id));
+      setGoalQueue(removeGoalQueueItemsForConversation(id, rootPath));
     },
-    [activeConversationId, currentGoalConversationId, saveConversations]
+    [activeConversationId, currentGoalConversationId, rootPath, saveConversations, currentGoal]
   );
 
   const handleResumeGoal = useCallback(() => {
     if (!currentGoal) return;
     const goalConversationId = currentGoalConversationId || activeConversationId;
     if (!goalConversationId) return;
-    const resumePrompt = buildResumeGoalPrompt(currentGoal);
-    const source = buildResumeSourceFromGoal(goalConversationId, currentGoal, goalAgents, goalRunMeta);
+    const resumePrompt = buildResumeGoalPrompt(currentGoal, workspaceName);
+    const source = buildResumeSourceFromGoal(goalConversationId, currentGoal, goalAgents, goalRunMeta, rootPath);
     pendingResumeSourceRef.current = { item: source, mode: 'manual' };
-    clearActiveGoalSnapshot();
+    clearActiveGoalSnapshot(rootPath);
     autoResumeTriggeredGoalIdRef.current = currentGoal.id;
     setGoalQueue(transitionGoalQueueItem(source.id, {
       status: 'paused',
       eventType: 'manual_continue',
       note: '已生成续跑草稿，原断点保留',
       autoResumeEnabled: false,
-    }));
+    }, rootPath));
     clearGoalState();
     setDraftPrompt({ id: Date.now(), text: resumePrompt });
     window.dispatchEvent(new Event('piano-focus-input'));
-  }, [activeConversationId, currentGoal, currentGoalConversationId, goalAgents, goalRunMeta]);
+  }, [activeConversationId, currentGoal, currentGoalConversationId, goalAgents, goalRunMeta, rootPath, workspaceName]);
 
   const handleDismissGoal = useCallback(() => {
     clearTriggeredAutoResumeGoal(autoResumeTriggeredGoalIdRef, currentGoal?.id);
-    clearActiveGoalSnapshot();
+    clearActiveGoalSnapshot(rootPath);
     if (currentGoal) {
-      setGoalQueue(removeGoalQueueItem(currentGoal.id));
+      setGoalQueue(removeGoalQueueItem(currentGoal.id, rootPath));
     }
     clearGoalState();
-  }, []);
+  }, [currentGoal, rootPath]);
 
   const handleOpenGoalConversation = useCallback((conversationId: string) => {
     setActiveConversationId(conversationId);
   }, []);
 
   const handleResumeGoalQueueItem = useCallback((goalId: string) => {
-    const item = loadGoalQueue().find((queueItem) => queueItem.id === goalId);
+    const item = loadGoalQueue(false, rootPath).find((queueItem) => queueItem.id === goalId);
     if (!item?.goal) return;
 
     pendingResumeSourceRef.current = { item, mode: 'manual' };
-    clearActiveGoalSnapshot();
+    clearActiveGoalSnapshot(rootPath);
     autoResumeTriggeredGoalIdRef.current = item.id;
     setGoalQueue(transitionGoalQueueItem(goalId, {
       status: 'paused',
       eventType: 'manual_continue',
       note: '已生成续跑草稿，等待用户发送',
       autoResumeEnabled: false,
-    }));
+    }, rootPath));
     setActiveConversationId(item.conversationId);
     clearGoalState();
-    setDraftPrompt({ id: Date.now(), text: buildResumeGoalPrompt(item.goal as Goal) });
+    setDraftPrompt({ id: Date.now(), text: buildResumeGoalPrompt(item.goal as Goal, workspaceName) });
     window.dispatchEvent(new Event('piano-focus-input'));
-  }, []);
+  }, [rootPath, workspaceName]);
 
   const handlePauseGoalQueueItem = useCallback((goalId: string) => {
     releaseQueueSchedulerLock(goalId);
@@ -1071,7 +1119,7 @@ const App: React.FC = () => {
       eventType: 'paused',
       note: '已暂停自动续跑',
       autoResumeEnabled: false,
-    });
+    }, rootPath);
     setGoalQueue(updated);
 
     if (currentGoal?.id === goalId && goalRunMeta) {
@@ -1083,18 +1131,18 @@ const App: React.FC = () => {
       };
       setGoalRunMeta(nextMeta);
       const goalConversationId = currentGoalConversationId || activeConversationId;
-      saveActiveGoalSnapshot(goalConversationId, currentGoal, goalAgents, nextMeta, {}, 'paused', createGoalQueueEvent('paused', '当前目标已暂停自动续跑'));
+      saveActiveGoalSnapshot(goalConversationId, currentGoal, goalAgents, nextMeta, {}, 'paused', createGoalQueueEvent('paused', '当前目标已暂停自动续跑'), rootPath);
     }
-  }, [activeConversationId, currentGoal, currentGoalConversationId, goalAgents, goalRunMeta, releaseQueueSchedulerLock]);
+  }, [activeConversationId, currentGoal, currentGoalConversationId, goalAgents, goalRunMeta, releaseQueueSchedulerLock, rootPath]);
 
   const handleRemoveGoalQueueItem = useCallback((goalId: string) => {
     releaseQueueSchedulerLock(goalId);
-    setGoalQueue(removeGoalQueueItem(goalId));
+    setGoalQueue(removeGoalQueueItem(goalId, rootPath));
     if (currentGoal?.id === goalId) {
-      clearActiveGoalSnapshot();
+      clearActiveGoalSnapshot(rootPath);
       clearGoalState();
     }
-  }, [currentGoal, releaseQueueSchedulerLock]);
+  }, [currentGoal, releaseQueueSchedulerLock, rootPath]);
 
   useKeyboardShortcuts({
     isStreamingRef,
@@ -1356,7 +1404,6 @@ const App: React.FC = () => {
               : undefined;
         const matchedProfile = profiles.find((p) =>
           p.id.toLowerCase() === normalizedSelector ||
-          p.name.toLowerCase() === normalizedSelector ||
           p.model.toLowerCase() === normalizedSelector
         );
         const selectedModel = matchedProfile?.model || aliasModel || selector;
@@ -1669,11 +1716,11 @@ return false; // Not handled
               }, undefined, createGoalQueueEvent(goal.status === 'completed' ? 'completed' : 'updated', goal.status === 'completed' ? '目标完成' : '目标执行结束'));
               setGoalRunMeta(finalSnapshot?.meta || null);
               if (resumeSource) {
-                await completeResumeSource(resumeSource.item, goal.id);
-                inheritResumeSource(goal.id, resumeSource.item);
+                await completeResumeSource(resumeSource.item, goal.id, rootPath);
+                inheritResumeSource(goal.id, resumeSource.item, rootPath);
                 releaseQueueSchedulerLock(resumeSource.item.id);
               }
-              setGoalQueue(loadGoalQueue());
+              setGoalQueue(loadGoalQueue(false, rootPath));
 
               const statusMsg: ChatMessage = {
                 id: `goal_status_${Date.now()}`,
@@ -2685,7 +2732,7 @@ return false; // Not handled
         autoResumeEnabled: false,
       }));
       clearGoalState();
-      void handleSend(buildResumeGoalPrompt(snapshot.goal), undefined, undefined, goalConversationId);
+      void handleSend(buildResumeGoalPrompt(snapshot.goal, workspaceName), undefined, undefined, goalConversationId);
     };
   }, [activeConversationId, currentGoalConversationId, handleSend, apiSettings.autoResumeGoals]);
 
@@ -2774,7 +2821,7 @@ return false; // Not handled
       safeStorage.setItem(GOAL_QUEUE_STORAGE_KEY, JSON.stringify(nextQueue));
       persistAppState(GOAL_QUEUE_APP_STATE_KEY, nextQueue);
       setGoalQueue(nextQueue);
-      void handleSend(buildResumeGoalPrompt(claimed.goal as Goal), undefined, undefined, claimed.conversationId);
+      void handleSend(buildResumeGoalPrompt(claimed.goal as Goal, workspaceName), undefined, undefined, claimed.conversationId);
     };
   }, [currentGoal, handleSend, startQueueHeartbeat, apiSettings.autoResumeGoals]);
 

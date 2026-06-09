@@ -5,6 +5,7 @@ import type { PromptTemplate } from '../../utils/prompt-templates';
 import { loadAllTemplates, expandTemplate } from '../../utils/prompt-templates';
 import type { Settings } from '../../config/default-settings';
 import { safeStorage } from '../../utils/storage';
+import { getWorkspaceStorageKey } from '../../utils/workspace-context';
 
 const SYSTEM_COMMANDS: PromptTemplate[] = [
   {
@@ -105,8 +106,10 @@ const InputArea: React.FC<InputAreaProps> = ({
   apiSettings, onUpdateSettings, draftPrompt, contextTokens = 0,
   onOpenSettings
 }) => {
+  const draftStorageKey = getWorkspaceStorageKey('piano-draft', rootPath);
+  const historyStorageKey = getWorkspaceStorageKey('piano-input-history', rootPath);
   const [input, setInput] = useState(() => {
-    return safeStorage.getItem('piano-draft') || '';
+    return safeStorage.getItem(draftStorageKey) || '';
   });
   const [templates, setTemplates] = useState<PromptTemplate[]>([]);
   const [history, setHistory] = useState<string[]>([]);
@@ -149,22 +152,22 @@ const InputArea: React.FC<InputAreaProps> = ({
   const contextLevel = contextPercent < 60 ? 'low' : contextPercent < 85 ? 'medium' : 'high';
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (input.trim()) safeStorage.setItem('piano-draft', input);
-      else safeStorage.removeItem('piano-draft');
+      if (input.trim()) safeStorage.setItem(draftStorageKey, input);
+      else safeStorage.removeItem(draftStorageKey);
     }, 500);
     return () => clearTimeout(timer);
-  }, [input]);
+  }, [input, draftStorageKey]);
 
   useEffect(() => {
     try {
-      const stored = safeStorage.getItem('piano-input-history');
+      const stored = safeStorage.getItem(historyStorageKey);
       if (stored) {
         setHistory(JSON.parse(stored));
       }
     } catch (err) {
       console.error('[InputArea] Failed to load history:', err);
     }
-  }, []);
+  }, [historyStorageKey]);
 
   const addToHistory = (text: string) => {
     setHistory(prev => {
@@ -172,7 +175,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         return prev;
       }
       const updated = [text, ...prev.filter(item => item !== text)].slice(0, 50);
-      safeStorage.setItem('piano-input-history', JSON.stringify(updated));
+      safeStorage.setItem(historyStorageKey, JSON.stringify(updated));
       return updated;
     });
   };
