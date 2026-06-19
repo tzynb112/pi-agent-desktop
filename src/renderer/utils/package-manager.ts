@@ -34,6 +34,34 @@ export interface PackageInstallOptions {
   scope?: 'global' | 'project';
 }
 
+const NPM_PACKAGE_RE = /^(?:@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/i;
+const PACKAGE_VERSION_RE = /^[a-z0-9._~:+-]+$/i;
+const GIT_URL_RE = /^(?:https?:\/\/|ssh:\/\/|git@)[^\s"'`;&|<>]+$/i;
+
+function quotePowerShell(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function assertSafeVersion(version?: string): void {
+  if (version && !PACKAGE_VERSION_RE.test(version)) {
+    throw new Error(`Invalid package version or ref: ${version}`);
+  }
+}
+
+function assertSafeNpmPackage(name: string, version?: string): void {
+  if (!NPM_PACKAGE_RE.test(name)) {
+    throw new Error(`Invalid npm package name: ${name}`);
+  }
+  assertSafeVersion(version);
+}
+
+function assertSafeGitUrl(url: string, version?: string): void {
+  if (!GIT_URL_RE.test(url)) {
+    throw new Error(`Invalid git URL: ${url}`);
+  }
+  assertSafeVersion(version);
+}
+
 /**
  * Parse package source string (e.g., "npm:@foo/bar@1.0.0", "git:github.com/user/repo@v1")
  */
@@ -156,12 +184,21 @@ export async function installPackage(
 
     switch (source) {
       case 'npm':
-        installCmd = `cd "${baseDir}\\npm" && npm install ${url}${version ? `@${version}` : ''}`;
+        assertSafeNpmPackage(url, version);
+        installCmd = [
+          `New-Item -ItemType Directory -Force -Path ${quotePowerShell(`${baseDir}\\npm`)} | Out-Null`,
+          `Set-Location -LiteralPath ${quotePowerShell(`${baseDir}\\npm`)}`,
+          `npm install ${quotePowerShell(`${url}${version ? `@${version}` : ''}`)}`,
+        ].join('; ');
         break;
       case 'git':
-        installCmd = `git clone ${url} "${baseDir}\\git\\${url.replace(/[^a-zA-Z0-9]/g, '_')}"`;
+        assertSafeGitUrl(url, version);
+        installCmd = [
+          `New-Item -ItemType Directory -Force -Path ${quotePowerShell(`${baseDir}\\git`)} | Out-Null`,
+          `git clone ${quotePowerShell(url)} ${quotePowerShell(`${baseDir}\\git\\${url.replace(/[^a-zA-Z0-9]/g, '_')}`)}`,
+        ].join('; ');
         if (version) {
-          installCmd += ` && cd "${baseDir}\\git\\${url.replace(/[^a-zA-Z0-9]/g, '_')}" && git checkout ${version}`;
+          installCmd += `; Set-Location -LiteralPath ${quotePowerShell(`${baseDir}\\git\\${url.replace(/[^a-zA-Z0-9]/g, '_')}`)}; git checkout ${quotePowerShell(version)}`;
         }
         break;
       case 'local':
@@ -226,7 +263,8 @@ export async function removePackage(
     
     switch (pkg.source) {
       case 'npm':
-        await executeCommand(`cd "${baseDir}\\npm" && npm uninstall ${pkg.name}`);
+        assertSafeNpmPackage(pkg.name);
+        await executeCommand(`Set-Location -LiteralPath ${quotePowerShell(`${baseDir}\\npm`)}; npm uninstall ${quotePowerShell(pkg.name)}`);
         break;
       case 'git':
         const gitDir = `${baseDir}\\git\\${pkg.url.replace(/[^a-zA-Z0-9]/g, '_')}`;

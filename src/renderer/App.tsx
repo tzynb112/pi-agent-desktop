@@ -1302,7 +1302,7 @@ const App: React.FC = () => {
                 });
               });
               if (!approved) {
-                return 'Error: 操作已被用户安全拦截。';
+                return 'Error: Operation blocked by the safety guard.';
               }
               parsedArgs.__dangerousApproved = true;
               finalArguments = JSON.stringify(parsedArgs);

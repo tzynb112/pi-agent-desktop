@@ -18,6 +18,10 @@ Current release: `v1.0.17`
 1. Double-click `start.bat`.
 2. Or run:
 
+```bash
+npm run start
+```
+
 The app starts the renderer on `http://localhost:9000` and opens the Electron window once the main process is ready.
 
 ## Scripts / 脚本
@@ -54,4 +58,3 @@ Key entry points:
 - Local Codex workspace data lives under `.arts/` and `.codeartsdoer/` and is treated as environment state, not product code.
 - At the moment, the official release package is for Windows only.
 - Conversations and settings are stored in the local user profile, so reinstalling the app does not clear them automatically.
-

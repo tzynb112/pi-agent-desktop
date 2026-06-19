@@ -54,7 +54,7 @@ export const DEFAULT_SETTINGS: Settings = {
   model: 'deepseek-v4-flash',
   temperature: 0.7,
   maxTokens: 4096,
-  trustMode: true,
+  trustMode: false,
   topP: 0.9,
   frequencyPenalty: 0,
   presencePenalty: 0,
@@ -64,10 +64,10 @@ export const DEFAULT_SETTINGS: Settings = {
     {
       id: 'skill_review',
       name: '代码审查专家',
-      description: '对生成的代码实施极为苛刻的单测与安全审查，规避潜在缺陷。',
+      description: '对生成的代码实施严格的单测与安全审查，规避潜在缺陷。',
       enabled: false,
       prompt: 'Perform detailed code audits on every solution, calling out potential memory leaks, security holes, and performance degradation.',
-    }
+    },
   ],
   enabledTools: {
     read: true,
@@ -98,7 +98,7 @@ export const DEFAULT_SETTINGS: Settings = {
       reasoningEffort: 'medium',
       temperature: 0.7,
       maxTokens: 4096,
-    }
+    },
   ],
   activeModelProfileId: 'profile_default',
 };

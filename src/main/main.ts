@@ -1,8 +1,9 @@
-import { app, BrowserWindow, dialog, IpcMainEvent, ipcMain, nativeImage } from 'electron';
+import { app, BrowserWindow, dialog, IpcMainEvent, IpcMainInvokeEvent, ipcMain, nativeImage } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { exec, spawn, ChildProcess } from 'child_process';
 import { promisify, TextDecoder } from 'util';
+import { fileURLToPath } from 'url';
 import type {
   ActiveGoalDispatchEvent,
   ApiProxyRequest,
@@ -200,6 +201,71 @@ const activeToolProcesses = new Map<string, ChildProcess>();
 const cancelledToolProcessIds = new Set<string>();
 let goalStateWatchdog: NodeJS.Timeout | null = null;
 let goalDispatchWatchdog: NodeJS.Timeout | null = null;
+let trustedWorkspacePath: string | null = null;
+
+function isSubPath(candidatePath: string, rootPath: string): boolean {
+  const normalizedCandidate = path.resolve(candidatePath);
+  const normalizedRoot = path.resolve(rootPath);
+  const candidate = process.platform === 'win32' ? normalizedCandidate.toLowerCase() : normalizedCandidate;
+  const root = process.platform === 'win32' ? normalizedRoot.toLowerCase() : normalizedRoot;
+  return candidate === root || candidate.startsWith(root + path.sep);
+}
+
+function getRendererRootPath(): string {
+  return path.resolve(__dirname, '../renderer');
+}
+
+function isTrustedRendererUrl(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl);
+    if (process.env.NODE_ENV === 'development') {
+      const isDevHost = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '::1';
+      return url.protocol === 'http:' && isDevHost && url.port === '9000';
+    }
+
+    if (url.protocol !== 'file:') return false;
+    return isSubPath(fileURLToPath(url), getRendererRootPath());
+  } catch {
+    return false;
+  }
+}
+
+function requireTrustedSender(event: IpcMainEvent | IpcMainInvokeEvent): void {
+  if (BrowserWindow.fromWebContents(event.sender) !== mainWindow || !isTrustedRendererUrl(event.sender.getURL())) {
+    throw new Error('Blocked IPC call from untrusted renderer');
+  }
+}
+
+function getRendererFileAccessRoots(): string[] {
+  const roots = [app.getPath('userData'), path.join(app.getPath('home'), '.pi', 'agent')];
+  const workspacePath = trustedWorkspacePath || readCurrentWorkspacePath();
+  if (workspacePath) roots.push(workspacePath);
+  return roots;
+}
+
+function isRendererFilePathAllowed(filePath: string): boolean {
+  if (typeof filePath !== 'string' || !filePath.trim()) return false;
+  try {
+    const resolved = path.resolve(filePath);
+    return getRendererFileAccessRoots().some((root) => isSubPath(resolved, root));
+  } catch {
+    return false;
+  }
+}
+
+function assertRendererFilePathAllowed(filePath: string): void {
+  if (!isRendererFilePathAllowed(filePath)) {
+    throw new Error(`Path is outside the active workspace or trusted app directories: ${filePath}`);
+  }
+}
+
+function validateApiProxyUrl(rawUrl: string): string {
+  const url = new URL(rawUrl);
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    throw new Error(`Unsupported API protocol: ${url.protocol}`);
+  }
+  return url.toString();
+}
 
 function normalizeCustomToolArgs(rawArgs: any): Record<string, any> {
   if (rawArgs === undefined || rawArgs === null || rawArgs === '') return {};
@@ -1104,6 +1170,14 @@ function createWindow(): void {
     },
   });
 
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
+    if (!isTrustedRendererUrl(navigationUrl)) {
+      event.preventDefault();
+      console.warn(`[Main] Blocked renderer navigation to untrusted URL: ${navigationUrl}`);
+    }
+  });
+
   if (process.env.NODE_ENV === 'development') {
     // Retry loading from webpack dev server with backoff
     const loadDevUrl = async () => {
@@ -1178,10 +1252,12 @@ app.on('window-all-closed', () => {
 });
 
 ipcMain.on('window-minimize', (event: IpcMainEvent) => {
+  requireTrustedSender(event);
   BrowserWindow.fromWebContents(event.sender)?.minimize();
 });
 
 ipcMain.on('window-maximize', (event: IpcMainEvent) => {
+  requireTrustedSender(event);
   const win = BrowserWindow.fromWebContents(event.sender);
   if (win?.isMaximized()) {
     win.unmaximize();
@@ -1191,17 +1267,22 @@ ipcMain.on('window-maximize', (event: IpcMainEvent) => {
 });
 
 ipcMain.on('window-close', (event: IpcMainEvent) => {
+  requireTrustedSender(event);
   BrowserWindow.fromWebContents(event.sender)?.close();
 });
 
-ipcMain.handle('dialog-open-directory', async () => {
+ipcMain.handle('dialog-open-directory', async (event: IpcMainInvokeEvent) => {
+  requireTrustedSender(event);
   const result = await dialog.showOpenDialog({
     properties: ['openDirectory'],
   });
-  return result.canceled ? null : result.filePaths[0];
+  if (result.canceled) return null;
+  trustedWorkspacePath = normalizeWorkspacePath(result.filePaths[0]);
+  return result.filePaths[0];
 });
 
-ipcMain.handle('dialog-save-file', async (_event: any, options: FileDialogOptions) => {
+ipcMain.handle('dialog-save-file', async (event: IpcMainInvokeEvent, options: FileDialogOptions) => {
+  requireTrustedSender(event);
   const result = await dialog.showSaveDialog({
     defaultPath: options.defaultPath,
     filters: options.filters || [{ name: 'Markdown', extensions: ['md'] }, { name: 'All Files', extensions: ['*'] }],
@@ -1209,8 +1290,10 @@ ipcMain.handle('dialog-save-file', async (_event: any, options: FileDialogOption
   return result.canceled ? null : result.filePath;
 });
 
-ipcMain.handle('read-directory', async (_event: any, dirPath: string): Promise<FileEntry[]> => {
+ipcMain.handle('read-directory', async (event: IpcMainInvokeEvent, dirPath: string): Promise<FileEntry[]> => {
+  requireTrustedSender(event);
   try {
+    assertRendererFilePathAllowed(dirPath);
     const cacheKey = `dir:${dirPath}`;
     const cached = directoryCache.get(cacheKey) as FileEntry[] | undefined;
     if (cached !== undefined) return cached;
@@ -1228,8 +1311,10 @@ ipcMain.handle('read-directory', async (_event: any, dirPath: string): Promise<F
   }
 });
 
-ipcMain.handle('read-file', async (_event: any, filePath: string) => {
+ipcMain.handle('read-file', async (event: IpcMainInvokeEvent, filePath: string) => {
+  requireTrustedSender(event);
   try {
+    assertRendererFilePathAllowed(filePath);
     // 尝试获取文件 mtime 作为缓存 key 的一部分
     let cacheKey = '';
     try {
@@ -1249,8 +1334,10 @@ ipcMain.handle('read-file', async (_event: any, filePath: string) => {
   }
 });
 
-ipcMain.handle('write-file', async (_event: any, filePath: string, content: string) => {
+ipcMain.handle('write-file', async (event: IpcMainInvokeEvent, filePath: string, content: string) => {
+  requireTrustedSender(event);
   try {
+    assertRendererFilePathAllowed(filePath);
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, content, 'utf-8');
     return true;
@@ -1259,7 +1346,8 @@ ipcMain.handle('write-file', async (_event: any, filePath: string, content: stri
   }
 });
 
-ipcMain.handle('app-state-read', async (_event: any, key: string) => {
+ipcMain.handle('app-state-read', async (event: IpcMainInvokeEvent, key: string) => {
+  requireTrustedSender(event);
   const cacheKey = `appstate:${getAppStatePath(key)}`;
   const cached = appStateCache.get(cacheKey);
   if (cached !== undefined) return cached;
@@ -1269,9 +1357,13 @@ ipcMain.handle('app-state-read', async (_event: any, key: string) => {
   return value;
 });
 
-ipcMain.handle('app-state-write', async (_event: any, key: string, value: unknown) => {
+ipcMain.handle('app-state-write', async (event: IpcMainInvokeEvent, key: string, value: unknown) => {
+  requireTrustedSender(event);
   try {
     writeJsonState(key, value);
+    if (key === 'active-workspace-path') {
+      trustedWorkspacePath = typeof value === 'string' ? normalizeWorkspacePath(value) : null;
+    }
     appStateCache.delete(`appstate:${getAppStatePath(key)}`);
     return true;
   } catch (err: any) {
@@ -1280,10 +1372,14 @@ ipcMain.handle('app-state-write', async (_event: any, key: string, value: unknow
   }
 });
 
-ipcMain.handle('app-state-remove', async (_event: any, key: string) => {
+ipcMain.handle('app-state-remove', async (event: IpcMainInvokeEvent, key: string) => {
+  requireTrustedSender(event);
   try {
     const filePath = getAppStatePath(key);
     appStateCache.delete(`appstate:${filePath}`);
+    if (key === 'active-workspace-path') {
+      trustedWorkspacePath = null;
+    }
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
     }
@@ -1294,7 +1390,8 @@ ipcMain.handle('app-state-remove', async (_event: any, key: string) => {
   }
 });
 
-ipcMain.handle('goal-queue-claim', async (_event: any, goalId: string) => {
+ipcMain.handle('goal-queue-claim', async (event: IpcMainInvokeEvent, goalId: string) => {
+  requireTrustedSender(event);
   try {
     if (!goalId) return null;
     return claimGoalQueueItem(goalId);
@@ -1304,7 +1401,8 @@ ipcMain.handle('goal-queue-claim', async (_event: any, goalId: string) => {
   }
 });
 
-ipcMain.handle('goal-queue-heartbeat', async (_event: any, goalId: string) => {
+ipcMain.handle('goal-queue-heartbeat', async (event: IpcMainInvokeEvent, goalId: string) => {
+  requireTrustedSender(event);
   try {
     if (!goalId) return null;
     return heartbeatGoalQueueItem(goalId);
@@ -1314,12 +1412,11 @@ ipcMain.handle('goal-queue-heartbeat', async (_event: any, goalId: string) => {
   }
 });
 
-ipcMain.handle('goal-queue-complete', async (_event: any, goalId: string, targetGoalId?: string) => {
+ipcMain.handle('goal-queue-complete', async (event: IpcMainInvokeEvent, goalId: string, targetGoalId?: string) => {
+  requireTrustedSender(event);
   try {
     if (!goalId) return null;
-    const note = targetGoalId
-                  ? `已移交给续跑目标�?{targetGoalId}`
-      : '续跑源任务已完成';
+    const note = targetGoalId ? `已移交给续跑目标 ${targetGoalId}` : '续跑源任务已完成';
     return finishGoalQueueItem(goalId, 'completed', note, { targetGoalId });
   } catch (err: any) {
     console.error(`[GoalState] Failed to complete queue item "${goalId}":`, err.message);
@@ -1327,7 +1424,8 @@ ipcMain.handle('goal-queue-complete', async (_event: any, goalId: string, target
   }
 });
 
-ipcMain.handle('goal-queue-fail', async (_event: any, goalId: string, note?: string) => {
+ipcMain.handle('goal-queue-fail', async (event: IpcMainInvokeEvent, goalId: string, note?: string) => {
+  requireTrustedSender(event);
   try {
     if (!goalId) return null;
     return finishGoalQueueItem(goalId, 'failed', note || '续跑任务失败，已保存断点');
@@ -1349,7 +1447,7 @@ async function executeGoalRunnerTool(toolName: string, args: string, toolCallId?
     const result = await executeToolInternal(toolName, parsedArgs, toolCallId, {
       sandboxType: 'guard',
       dangerousKeywords: '',
-      trustMode: true,
+      trustMode: false,
     });
     return result.success ? (result.result || 'Tool executed successfully') : `Error: ${result.error}`;
   } catch (err: any) {
@@ -1480,7 +1578,8 @@ async function runGoalInMainProcess(payload: GoalRunExecutePayload): Promise<Goa
   }
 }
 
-ipcMain.handle('goal-run-start', async (_event: any, payload: GoalRunStartPayload) => {
+ipcMain.handle('goal-run-start', async (event: IpcMainInvokeEvent, payload: GoalRunStartPayload) => {
+  requireTrustedSender(event);
   try {
     return startGoalRunState(payload);
   } catch (err: any) {
@@ -1489,7 +1588,8 @@ ipcMain.handle('goal-run-start', async (_event: any, payload: GoalRunStartPayloa
   }
 });
 
-ipcMain.handle('goal-run-execute', async (_event: any, payload: GoalRunExecutePayload) => {
+ipcMain.handle('goal-run-execute', async (event: IpcMainInvokeEvent, payload: GoalRunExecutePayload) => {
+  requireTrustedSender(event);
   try {
     if (!payload?.apiSettings?.baseURL || !payload?.apiSettings?.apiKey || !payload?.apiSettings?.model) {
       throw new Error('Missing API settings for main-process goal execution');
@@ -1501,7 +1601,8 @@ ipcMain.handle('goal-run-execute', async (_event: any, payload: GoalRunExecutePa
   }
 });
 
-ipcMain.handle('goal-run-latest-running', async (_event: any, workspacePath?: string | null) => {
+ipcMain.handle('goal-run-latest-running', async (event: IpcMainInvokeEvent, workspacePath?: string | null) => {
+  requireTrustedSender(event);
   try {
     return readLatestRunningGoalRunState(workspacePath ?? readCurrentWorkspacePath());
   } catch (err: any) {
@@ -1510,7 +1611,8 @@ ipcMain.handle('goal-run-latest-running', async (_event: any, workspacePath?: st
   }
 });
 
-ipcMain.handle('goal-run-heartbeat', async (_event: any, runId: string, patch?: GoalRunHeartbeatPatch) => {
+ipcMain.handle('goal-run-heartbeat', async (event: IpcMainInvokeEvent, runId: string, patch?: GoalRunHeartbeatPatch) => {
+  requireTrustedSender(event);
   try {
     if (!runId) return null;
     return heartbeatGoalRunState(runId, patch || {});
@@ -1520,7 +1622,8 @@ ipcMain.handle('goal-run-heartbeat', async (_event: any, runId: string, patch?: 
   }
 });
 
-ipcMain.handle('goal-run-event', async (_event: any, runId: string, event: GoalRunEventPatch) => {
+ipcMain.handle('goal-run-event', async (ipcEvent: IpcMainInvokeEvent, runId: string, event: GoalRunEventPatch) => {
+  requireTrustedSender(ipcEvent);
   try {
     if (!runId || !event?.type) return null;
     return appendGoalRunEventState(runId, event);
@@ -1530,7 +1633,8 @@ ipcMain.handle('goal-run-event', async (_event: any, runId: string, event: GoalR
   }
 });
 
-ipcMain.handle('goal-run-complete', async (_event: any, runId: string) => {
+ipcMain.handle('goal-run-complete', async (event: IpcMainInvokeEvent, runId: string) => {
+  requireTrustedSender(event);
   try {
     if (!runId) return null;
     return finishGoalRunState(runId, 'completed');
@@ -1540,7 +1644,8 @@ ipcMain.handle('goal-run-complete', async (_event: any, runId: string) => {
   }
 });
 
-ipcMain.handle('goal-run-fail', async (_event: any, runId: string, error?: string) => {
+ipcMain.handle('goal-run-fail', async (event: IpcMainInvokeEvent, runId: string, error?: string) => {
+  requireTrustedSender(event);
   try {
     if (!runId) return null;
     return finishGoalRunState(runId, 'failed', error);
@@ -1550,7 +1655,8 @@ ipcMain.handle('goal-run-fail', async (_event: any, runId: string, error?: strin
   }
 });
 
-ipcMain.handle('goal-run-control-request', async (_event: any, runId: string, action: GoalRunControlAction, reason?: string) => {
+ipcMain.handle('goal-run-control-request', async (event: IpcMainInvokeEvent, runId: string, action: GoalRunControlAction, reason?: string) => {
+  requireTrustedSender(event);
   try {
     if (!runId || !['pause', 'cancel', 'stop'].includes(action)) return null;
     return requestGoalRunControlState(runId, action, reason);
@@ -1560,7 +1666,8 @@ ipcMain.handle('goal-run-control-request', async (_event: any, runId: string, ac
   }
 });
 
-ipcMain.handle('goal-run-control-read', async (_event: any, runId: string) => {
+ipcMain.handle('goal-run-control-read', async (event: IpcMainInvokeEvent, runId: string) => {
+  requireTrustedSender(event);
   try {
     if (!runId) return null;
     return readGoalRunControlState(runId);
@@ -1570,7 +1677,8 @@ ipcMain.handle('goal-run-control-read', async (_event: any, runId: string) => {
   }
 });
 
-ipcMain.handle('goal-run-control-ack', async (_event: any, runId: string) => {
+ipcMain.handle('goal-run-control-ack', async (event: IpcMainInvokeEvent, runId: string) => {
+  requireTrustedSender(event);
   try {
     if (!runId) return null;
     return acknowledgeGoalRunControlState(runId);
@@ -1580,7 +1688,8 @@ ipcMain.handle('goal-run-control-ack', async (_event: any, runId: string) => {
   }
 });
 
-ipcMain.handle('tools-cancel-active', async () => {
+ipcMain.handle('tools-cancel-active', async (event: IpcMainInvokeEvent) => {
+  requireTrustedSender(event);
   let cancelled = 0;
   for (const [id, child] of activeToolProcesses.entries()) {
     if (!child.killed) {
@@ -1709,7 +1818,7 @@ function buildToolExecutionOptions(options?: ToolExecutionOptions): Required<Too
   return {
     sandboxType: options?.sandboxType ?? 'guard',
     dangerousKeywords: options?.dangerousKeywords ?? '',
-    trustMode: options?.trustMode ?? true,
+    trustMode: options?.trustMode ?? false,
   };
 }
 
@@ -1766,6 +1875,7 @@ async function executeToolInternal(
       const filePath = parsedArgs.file_path;
       if (!filePath) return { success: false, error: 'Missing file_path argument' };
       try {
+        assertRendererFilePathAllowed(filePath);
         if (toolCallId && mainWindow) {
           mainWindow.webContents.send('tool-live-output', { toolCallId, text: `Reading file: ${filePath}...\n` });
         }
@@ -1787,6 +1897,7 @@ async function executeToolInternal(
       if (!filePath) return { success: false, error: 'Missing file_path argument' };
       if (content === undefined) return { success: false, error: 'Missing content argument' };
       try {
+        assertRendererFilePathAllowed(filePath);
         const dir = path.dirname(filePath);
         if (dir && !fs.existsSync(dir)) {
           fs.mkdirSync(dir, { recursive: true });
@@ -1838,6 +1949,7 @@ async function executeToolInternal(
       if (!filePath) return { success: false, error: 'Missing file_path argument' };
       if (!oldStr) return { success: false, error: 'Missing old_str argument' };
       try {
+        assertRendererFilePathAllowed(filePath);
         if (toolCallId && mainWindow) {
           mainWindow.webContents.send('tool-live-output', { toolCallId, text: `Editing file: ${filePath}...\n` });
         }
@@ -2148,7 +2260,8 @@ function decodeToolOutputBuffer(buffer: Buffer): string {
 }
 
 // Tool execution handlers
-ipcMain.handle('execute-tool', async (_event: any, toolName: string, args: string, toolCallId?: string): Promise<ToolExecutionResult> => {
+ipcMain.handle('execute-tool', async (event: IpcMainInvokeEvent, toolName: string, args: string, toolCallId?: string): Promise<ToolExecutionResult> => {
+  requireTrustedSender(event);
   try {
     let parsedArgs: any;
     try {
@@ -2172,7 +2285,6 @@ ipcMain.handle('execute-tool', async (_event: any, toolName: string, args: strin
           const content = fs.readFileSync(filePath, 'utf-8');
           console.log(`[Tool] Read ${filePath}: ${content.length} chars`);
           if (toolCallId && mainWindow) {
-            mainWindow.webContents.send('tool-live-output', { toolCallId, text: `�?文件读取完成: ${filePath} (${content.length} 字符)\n` });
           }
           return { success: true, result: content };
         } catch (err: any) {
@@ -2204,7 +2316,6 @@ ipcMain.handle('execute-tool', async (_event: any, toolName: string, args: strin
                   offset += chunk.length;
                   ok = stream.write(chunk);
                   const progress = Math.min(100, Math.floor((offset / content.length) * 100));
-                  mainWindow!.webContents.send('tool-live-output', { toolCallId, text: `正在写入: ${filePath} �?${progress}% (${offset}/${content.length} 字符)\n` });
                 }
                 if (offset >= content.length) {
                   stream.end(resolve);
@@ -2222,7 +2333,6 @@ ipcMain.handle('execute-tool', async (_event: any, toolName: string, args: strin
           }
           console.log(`[Tool] Wrote ${filePath}: ${content.length} chars`);
           if (toolCallId && mainWindow) {
-            mainWindow.webContents.send('tool-live-output', { toolCallId, text: `�?文件写入完成: ${filePath} (${content.length} 字符)\n` });
           }
           return { success: true, result: `File written successfully: ${filePath}` };
         } catch (err: any) {
@@ -2253,7 +2363,6 @@ ipcMain.handle('execute-tool', async (_event: any, toolName: string, args: strin
             fs.writeFileSync(filePath, content, 'utf-8');
             console.log(`[Tool] Edited ${filePath} (exact)`);
             if (toolCallId && mainWindow) {
-              mainWindow.webContents.send('tool-live-output', { toolCallId, text: `�?文件编辑完成: ${filePath}\n` });
             }
             return { success: true, result: `File edited successfully: ${filePath}` };
           }
@@ -2264,7 +2373,6 @@ ipcMain.handle('execute-tool', async (_event: any, toolName: string, args: strin
             fs.writeFileSync(filePath, fuzzyResult.content, 'utf-8');
             console.log(`[Tool] Edited ${filePath} (fuzzy: ${fuzzyResult.method}, similarity: ${fuzzyResult.similarity?.toFixed(2)})`);
             if (toolCallId && mainWindow) {
-              mainWindow.webContents.send('tool-live-output', { toolCallId, text: `�?文件编辑完成: ${filePath} (${fuzzyResult.method})\n` });
             }
             return { success: true, result: `File edited successfully: ${filePath} (matched via ${fuzzyResult.method})` };
           }
@@ -2549,12 +2657,14 @@ ipcMain.handle('execute-tool', async (_event: any, toolName: string, args: strin
 });
 
 // API proxy to avoid CORS issues in renderer
-ipcMain.handle('api-proxy', async (_event, requestData: ApiProxyRequest): Promise<{ status: number; body: string }> => {
+ipcMain.handle('api-proxy', async (event: IpcMainInvokeEvent, requestData: ApiProxyRequest): Promise<{ status: number; body: string }> => {
+  requireTrustedSender(event);
   try {
+    const requestUrl = validateApiProxyUrl(requestData.url);
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60_000);
     try {
-      const response = await fetch(requestData.url, {
+      const response = await fetch(requestUrl, {
         method: requestData.method,
         headers: {
           ...requestData.headers,
@@ -2575,17 +2685,19 @@ ipcMain.handle('api-proxy', async (_event, requestData: ApiProxyRequest): Promis
 
 // Streaming API proxy. The main process owns fetch so renderer code keeps CORS-free,
 // while chunks are pushed back over IPC as soon as they arrive.
-ipcMain.handle('api-proxy-stream', async (event, requestData: ApiProxyStreamRequest): Promise<{ status: number; body: string }> => {
+ipcMain.handle('api-proxy-stream', async (event: IpcMainInvokeEvent, requestData: ApiProxyStreamRequest): Promise<{ status: number; body: string }> => {
+  requireTrustedSender(event);
   const { streamId, ...fetchData } = requestData;
   const sendStreamEvent = (payload: Record<string, any>) => {
     event.sender.send('api-proxy-stream-event', { streamId, ...payload });
   };
 
   try {
+    const requestUrl = validateApiProxyUrl(fetchData.url);
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 300_000);
     try {
-      const response = await fetch(fetchData.url, {
+      const response = await fetch(requestUrl, {
         method: fetchData.method,
         headers: {
           ...fetchData.headers,
@@ -2629,7 +2741,8 @@ ipcMain.handle('api-proxy-stream', async (event, requestData: ApiProxyStreamRequ
 });
 
 // MCP Tool List Loader IPC Handler
-ipcMain.handle('load-mcp-tools', async (_event, servers: McpServerConfig[]) => {
+ipcMain.handle('load-mcp-tools', async (event: IpcMainInvokeEvent, servers: McpServerConfig[]) => {
+  requireTrustedSender(event);
   const activeIds = new Set((servers || []).filter(s => s.enabled).map(s => s.id));
   for (const id of Array.from(mcpClients.keys())) {
     if (!activeIds.has(id)) {
@@ -2660,7 +2773,8 @@ ipcMain.handle('load-mcp-tools', async (_event, servers: McpServerConfig[]) => {
 });
 
 // MCP Tool Executor IPC Handler
-ipcMain.handle('execute-mcp-tool', async (_event, serverId: string, toolName: string, args: string): Promise<ToolExecutionResult> => {
+ipcMain.handle('execute-mcp-tool', async (event: IpcMainInvokeEvent, serverId: string, toolName: string, args: string): Promise<ToolExecutionResult> => {
+  requireTrustedSender(event);
   const client = mcpClients.get(serverId);
   if (!client) {
     return { success: false, error: `MCP server is not connected or active` };
