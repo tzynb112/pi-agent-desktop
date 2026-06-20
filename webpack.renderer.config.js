@@ -10,7 +10,7 @@ module.exports = (env, argv) => {
     devtool: isProduction ? 'source-map' : 'eval-source-map',
     output: {
       path: path.resolve(__dirname, 'dist/renderer'),
-      filename: isProduction ? '[name].[contenthash].js' : 'bundle.js',
+      filename: isProduction ? '[name].[contenthash].js' : '[name].js',
       clean: true,
     },
     resolve: {
